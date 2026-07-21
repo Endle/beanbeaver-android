@@ -15,6 +15,31 @@ val modelsDir = modelCandidates.firstOrNull {
 } ?: modelCandidates.first()
 val modelAssetDir = layout.projectDirectory.dir("src/main/assets/models")
 
+// The beanbeaver-core (on-device scan engine) version this app is built
+// against, shown in the About footer. Read from the resolved Cargo.lock pin —
+// the git tag + short commit — so it can't drift from the .so actually linked.
+// This is the Android twin of iOS build-xcframework.sh emitting CoreVersion.swift;
+// we resolve it in Gradle instead of build-android.sh to keep that script's
+// touchy host-PATH handling alone.
+val coreVersion: String = run {
+    val lock = rootProject.projectDir.resolve("Cargo.lock")
+    val fallback = "unknown"
+    if (!lock.isFile) return@run fallback
+    // e.g. source = "git+https://github.com/Endle/beanbeaver-core?tag=v0.3.3#045203a…"
+    val source = lock.readLines()
+        .dropWhile { it.trim() != "name = \"bb-receipt-ffi\"" }
+        .firstOrNull { it.trimStart().startsWith("source = ") }
+        ?: return@run fallback
+    val tag = Regex("""[?&]tag=([^#"&]+)""").find(source)?.groupValues?.get(1)
+    val shortSha = Regex("""#([0-9a-f]{7,40})""").find(source)?.groupValues?.get(1)?.take(7)
+    when {
+        tag != null && shortSha != null -> "$tag ($shortSha)"
+        tag != null -> tag
+        shortSha != null -> shortSha
+        else -> fallback
+    }
+}
+
 val syncOcrModels by tasks.registering(Copy::class) {
     description = "Copy PP-OCRv5 ONNX models into app assets"
     from(modelsDir) {
@@ -51,6 +76,8 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
+        // Surfaced in the About footer (see BeanBeaverApp HomePane).
+        buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")
     }
 
     buildTypes {
@@ -72,6 +99,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         jniLibs {

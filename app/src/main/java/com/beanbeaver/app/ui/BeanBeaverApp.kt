@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -34,8 +35,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.beanbeaver.app.BuildConfig
 import com.beanbeaver.app.receipt.ReceiptPipeline
 import com.beanbeaver.app.receipt.ScanStatus
 import kotlinx.coroutines.Dispatchers
@@ -59,8 +64,17 @@ fun BeanBeaverApp(
     val status by pipeline.status.collectAsStateWithLifecycle()
     val progress by pipeline.scanProgress.collectAsStateWithLifecycle()
     val stepLabel by pipeline.scanStepLabel.collectAsStateWithLifecycle()
+    val capturedImage by pipeline.capturedImage.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Full-screen review of the original photo, opened from the result screen.
+    var showOriginalReceipt by rememberSaveable { mutableStateOf(false) }
+    val image = capturedImage
+    if (showOriginalReceipt && image != null) {
+        OriginReceiptScreen(imageData = image, onBack = { showOriginalReceipt = false })
+        return
+    }
 
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -121,6 +135,9 @@ fun BeanBeaverApp(
                     result = s.result,
                     wallMs = s.wallMs,
                     onHome = { pipeline.reset() },
+                    onShowOriginal = if (capturedImage != null) {
+                        { showOriginalReceipt = true }
+                    } else null,
                 )
             }
         }
@@ -169,7 +186,26 @@ private fun HomePane(
         ) {
             Text("Try bundled sample receipt")
         }
+        Spacer(Modifier.height(8.dp))
+        AboutVersions()
     }
+}
+
+/**
+ * App build + the beanbeaver-core (on-device scan engine) version it was
+ * compiled against — the Android twin of iOS Settings › About. The core string
+ * is injected from the Cargo.lock pin at build time (see app/build.gradle.kts),
+ * so it can't drift from the .so actually linked. Include both when reporting a
+ * scan issue.
+ */
+@Composable
+private fun AboutVersions() {
+    val appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+    Text(
+        "BeanBeaver $appVersion  ·  beanbeaver-core ${BuildConfig.CORE_VERSION}",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -213,6 +249,7 @@ private fun ResultPane(
     result: ReceiptResult,
     wallMs: Double,
     onHome: () -> Unit,
+    onShowOriginal: (() -> Unit)?,
 ) {
     val itemsSummary = remember(result) {
         result.items.take(12).joinToString("\n") { item ->
@@ -275,6 +312,14 @@ private fun ResultPane(
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+        }
+
+        if (onShowOriginal != null) {
+            OutlinedButton(onClick = onShowOriginal, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Show original receipt")
             }
         }
 

@@ -39,6 +39,15 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
     private val _scanStepLabel = MutableStateFlow(StepEstimate.steps.first().label)
     val scanStepLabel: StateFlow<String> = _scanStepLabel.asStateFlow()
 
+    /**
+     * The exact JPEG bytes the OCR saw, kept so the result screen can show the
+     * original receipt for review (see [ScanStatus.Done] and the zoomable
+     * viewer). Mirrors iOS `ReceiptPipeline.capturedImageURL`; we hold the bytes
+     * in memory rather than on disk since this MVP scans one receipt at a time.
+     */
+    private val _capturedImage = MutableStateFlow<ByteArray?>(null)
+    val capturedImage: StateFlow<ByteArray?> = _capturedImage.asStateFlow()
+
     var creditCardAccount: String = "Liabilities:CreditCard"
 
     private var progressJob: Job? = null
@@ -48,6 +57,7 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
         _status.value = ScanStatus.Idle
         _scanProgress.value = 0.0
         _scanStepLabel.value = StepEstimate.steps.first().label
+        _capturedImage.value = null
     }
 
     fun scanBundledSample() {
@@ -63,6 +73,7 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
     fun scan(imageData: ByteArray) {
         viewModelScope.launch {
             _status.value = ScanStatus.Scanning
+            _capturedImage.value = imageData
             _scanProgress.value = 0.0
             _scanStepLabel.value = StepEstimate.steps.first().label
             progressJob?.cancel()
