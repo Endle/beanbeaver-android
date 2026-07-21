@@ -95,6 +95,12 @@ if [ ! -d "$LLVM" ]; then
   echo "error: NDK llvm toolchain not at $LLVM" >&2
   exit 1
 fi
+# Host toolchain PATH (Apple clang), captured before the NDK is prepended. The
+# host uniffi-bindgen build below must NOT see the NDK's llvm/bin: NDK 30 ships
+# only a darwin-x86_64 host toolchain with no macOS compiler-rt, so a host link
+# through it fails to find libclang_rt.osx. The Android target builds still get
+# the NDK on PATH.
+HOST_PATH="$PATH"
 export PATH="$LLVM/bin:$PATH"
 
 CARGO_CFG="$WORK/cargo-config.toml"
@@ -213,7 +219,7 @@ for abi in $ABIS; do
 done
 
 echo ">> generating Kotlin bindings (host)"
-cargo build --lib -p "$CRATE" >/dev/null
+PATH="$HOST_PATH" cargo build --lib -p "$CRATE" >/dev/null
 HOST_LIB=""
 for cand in \
   "$CARGO_TARGET_DIR/debug/lib${LIB_NAME}.dylib" \
@@ -228,7 +234,7 @@ if [ -z "$HOST_LIB" ]; then
 fi
 
 GEN="$WORK/gen"; mkdir -p "$GEN"
-cargo run -q -p "$PACKAGE" --bin uniffi-bindgen -- \
+PATH="$HOST_PATH" cargo run -q -p "$PACKAGE" --bin uniffi-bindgen -- \
   generate --library "$HOST_LIB" --language kotlin --out-dir "$GEN"
 
 rm -rf "$PKG/src/main/kotlin/uniffi"
