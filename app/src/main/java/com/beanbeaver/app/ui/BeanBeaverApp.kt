@@ -4,8 +4,11 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,6 +29,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -42,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +57,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.beanbeaver.app.BuildConfig
 import com.beanbeaver.app.receipt.ReceiptPipeline
 import com.beanbeaver.app.receipt.ScanStatus
+import uniffi.bb_receipt_ffi.ScanTimings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -271,10 +278,7 @@ private fun ResultPane(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
-            "Scan ${"%.0f".format(wallMs)} ms  ·  Rust total ${"%.0f".format(result.timings.totalMs)} ms",
-            style = MaterialTheme.typography.labelMedium,
-        )
+        TimingBreakdown(result.timings, wallMs)
 
         if (result.confidence.needsReview) {
             Text(
@@ -326,5 +330,96 @@ private fun ResultPane(
         Button(onClick = onHome, modifier = Modifier.fillMaxWidth()) {
             Text("Scan another")
         }
+    }
+}
+
+/**
+ * Per-phase scan timing. The core reports each pipeline stage (see
+ * [ScanTimings]); we list them all with a bar proportional to the slowest
+ * phase, so the bottleneck is obvious at a glance.
+ *
+ * `Rust total` is the sum the core measured; `Wall` is what the app timed around
+ * the whole FFI call. The gap between them is `Overhead` — JNI marshalling, the
+ * Kotlin-side image handoff, and, on the *first* scan of a session, the one-off
+ * ONNX model load (models load lazily and aren't counted in the Rust phases).
+ */
+@Composable
+private fun TimingBreakdown(timings: ScanTimings, wallMs: Double) {
+    val phases = remember(timings) {
+        listOf(
+            "Prepare image" to timings.prepMs,
+            "Detect text" to timings.detectMs,
+            "Orientation" to timings.classifyMs,
+            "Recognize text" to timings.recognizeMs,
+            "Parse receipt" to timings.parseMs,
+        )
+    }
+    val maxMs = remember(phases) { phases.maxOf { it.second }.coerceAtLeast(1.0) }
+    val overheadMs = (wallMs - timings.totalMs).coerceAtLeast(0.0)
+
+    Card {
+        Column(
+            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("Timing", style = MaterialTheme.typography.titleSmall)
+            phases.forEach { (label, ms) ->
+                TimingRow(label, ms, (ms / maxMs).toFloat())
+            }
+            HorizontalDivider(Modifier.padding(vertical = 2.dp))
+            TimingTotalRow("Rust total", timings.totalMs)
+            TimingTotalRow("Overhead (JNI · 1st-scan model load)", overheadMs)
+            TimingTotalRow("Wall (scan)", wallMs, emphasize = true)
+        }
+    }
+}
+
+/** One phase: label, a bar sized to `fraction` of the slowest phase, and ms. */
+@Composable
+private fun TimingRow(label: String, ms: Double, fraction: Float) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "${"%.0f".format(ms)} ms",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            if (fraction > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(fraction)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+            }
+        }
+    }
+}
+
+/** A summary line (no bar) for the roll-up totals under the phase list. */
+@Composable
+private fun TimingTotalRow(label: String, ms: Double, emphasize: Boolean = false) {
+    val style = if (emphasize) MaterialTheme.typography.labelLarge
+    else MaterialTheme.typography.labelMedium
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = style)
+        Text("${"%.0f".format(ms)} ms", style = style, fontFamily = FontFamily.Monospace)
     }
 }
