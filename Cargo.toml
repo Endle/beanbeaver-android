@@ -1,0 +1,23 @@
+[package]
+name = "beanbeaver-android-ffi-build"
+version = "0.0.0"
+edition = "2021"
+publish = false
+default-run = "uniffi-bindgen"
+
+# Standalone Android tree: UniFFI bindgen + host batch_e2e harness.
+# Keep the bb-receipt-ffi tag in step with the iOS root Cargo.toml when bumping.
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[[bin]]
+name = "batch_e2e"
+path = "src/bin/batch_e2e.rs"
+
+[dependencies]
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.3.3" }
+# `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
+# the uniffi version bb-receipt-ffi pulls in (0.28).
+uniffi = { version = "0.28", features = ["cli"] }

@@ -1,0 +1,4 @@
+## Copy to local.properties (git-ignored) and adjust paths.
+sdk.dir=/path/to/Android/Sdk
+# Optional; build-android.sh also accepts ANDROID_NDK_HOME in the environment.
+# ndk.dir=/path/to/Android/Sdk/ndk/27.0.12077973

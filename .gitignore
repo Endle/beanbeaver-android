@@ -1,0 +1,18 @@
+# Standalone android/ ignores (also listed in parent .gitignore when co-located)
+/target/
+/.gradle/
+/.kotlin/
+**/build/
+/local.properties
+/captures/
+/e2e-results/
+/bbreceiptkit/src/main/jniLibs/
+/bbreceiptkit/src/main/kotlin/uniffi/bb_receipt_ffi/
+/bbreceiptkit/src/main/kotlin/com/beanbeaver/bbreceiptkit/BuildInfo.kt
+/app/src/main/assets/models/
+/models/*.onnx
+*.apk
+*.aab
+*.iml
+.idea/
+.DS_Store
