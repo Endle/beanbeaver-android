@@ -21,7 +21,6 @@ android/                         ← this directory is self-contained
     android-e2e.sh               adb batch harness
     compare-e2e.py
     fetch-models.sh
-  shell.nix                      JDK 17 + Android SDK/NDK
   gradlew …
 ```
 
@@ -29,11 +28,12 @@ Generated (git-ignored): `bbreceiptkit/.../jniLibs/`, `uniffi/` Kotlin, `app/...
 
 ## Build
 
+Prereqs: install **Android Studio** (bundles JDK 17 + SDK), then use its SDK
+Manager to add the **NDK** and an **arm64-v8a** system image. `build-android.sh`
+auto-finds the NDK under `$ANDROID_HOME/ndk/`.
+
 ```bash
 cd android
-
-# Optional: Nix for SDK/NDK/JDK
-nix-shell
 
 # Models (skip if ../models already has the three .onnx files)
 ./scripts/fetch-models.sh

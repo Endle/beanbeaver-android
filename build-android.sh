@@ -72,8 +72,9 @@ NDK="$(find_ndk || true)"
 if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
   cat >&2 <<EOF
 error: Android NDK not found.
-  Set ANDROID_NDK_HOME to your NDK root (e.g. \$ANDROID_HOME/ndk/27.0.12077973),
-  or enter this tree via: nix-shell  (see shell.nix)
+  Install the NDK via Android Studio's SDK Manager, then set ANDROID_NDK_HOME
+  to its root (e.g. \$ANDROID_HOME/ndk/27.0.12077973). build-android.sh also
+  auto-discovers \$ANDROID_HOME/ndk/<latest> when ANDROID_NDK_HOME is unset.
 EOF
   exit 1
 fi

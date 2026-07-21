@@ -35,8 +35,8 @@ val syncOcrModels by tasks.registering(Copy::class) {
 android {
     namespace = "com.beanbeaver.app"
     compileSdk = 35
-    // Pin to the build-tools version shipped by shell.nix / composeAndroidPackages
-    // so AGP does not try to install another package into a read-only Nix store SDK.
+    // Pin build-tools for reproducible builds; install this version via the
+    // Android Studio SDK Manager (or `sdkmanager "build-tools;35.0.0"`).
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
