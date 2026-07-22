@@ -51,6 +51,24 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
 
     var creditCardAccount: String = "Liabilities:CreditCard"
 
+    /**
+     * Whether to skip the textline-orientation classifier (~22% of scan time on
+     * this device). Backed by SharedPreferences and read by [session]; toggling
+     * it forces the next scan to reload the OCR session with/without the cls
+     * model. Fine for upright receipts; hurts 180°-rotated lines.
+     */
+    private val _skipOrientation = MutableStateFlow(prefsSkipOrientation(app))
+    val skipOrientation: StateFlow<Boolean> = _skipOrientation.asStateFlow()
+
+    fun setSkipOrientation(value: Boolean) {
+        getApplication<Application>()
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SKIP_ORIENTATION, value)
+            .apply()
+        _skipOrientation.value = value
+    }
+
     private var progressJob: Job? = null
 
     fun reset() {
@@ -147,6 +165,8 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "ReceiptPipeline"
+        private const val PREFS_NAME = "beanbeaver"
+        private const val KEY_SKIP_ORIENTATION = "skipOrientationCheck"
 
         @Volatile
         private var cached: OcrSession? = null
@@ -168,7 +188,7 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
         }
 
         private fun prefsSkipOrientation(context: Context): Boolean =
-            context.getSharedPreferences("beanbeaver", Context.MODE_PRIVATE)
-                .getBoolean("skipOrientationCheck", false)
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_SKIP_ORIENTATION, false)
     }
 }

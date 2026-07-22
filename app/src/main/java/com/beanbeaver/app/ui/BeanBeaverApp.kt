@@ -36,6 +36,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -74,6 +75,7 @@ fun BeanBeaverApp(
     val progress by pipeline.scanProgress.collectAsStateWithLifecycle()
     val stepLabel by pipeline.scanStepLabel.collectAsStateWithLifecycle()
     val capturedImage by pipeline.capturedImage.collectAsStateWithLifecycle()
+    val skipOrientation by pipeline.skipOrientation.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -131,6 +133,8 @@ fun BeanBeaverApp(
                         )
                     },
                     onSample = { pipeline.scanBundledSample() },
+                    skipOrientation = skipOrientation,
+                    onSkipOrientationChange = { pipeline.setSkipOrientation(it) },
                 )
                 is ScanStatus.Scanning -> ScanningPane(
                     progress = progress.toFloat(),
@@ -157,6 +161,8 @@ fun BeanBeaverApp(
 private fun HomePane(
     onPickPhoto: () -> Unit,
     onSample: () -> Unit,
+    skipOrientation: Boolean,
+    onSkipOrientationChange: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -196,7 +202,39 @@ private fun HomePane(
             Text("Try bundled sample receipt")
         }
         Spacer(Modifier.height(8.dp))
+        SkipOrientationToggle(
+            checked = skipOrientation,
+            onCheckedChange = onSkipOrientationChange,
+        )
+        Spacer(Modifier.height(8.dp))
         AboutVersions()
+    }
+}
+
+/**
+ * Toggle for the textline-orientation classifier. Off (skip) trades ~22% of scan
+ * time for correctness on 180°-rotated lines — safe for upright receipts. Backed
+ * by the `skipOrientationCheck` pref; flipping it reloads the OCR session on the
+ * next scan (see [ReceiptPipeline.session]).
+ */
+@Composable
+private fun SkipOrientationToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Skip orientation check", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Faster (~22%); may misread upside-down text.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
