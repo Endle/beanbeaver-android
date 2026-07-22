@@ -1,5 +1,6 @@
 package com.beanbeaver.app.ui
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -29,6 +30,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -38,7 +40,9 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -68,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.beanbeaver.app.github.GitHubSyncViewModel
+import com.beanbeaver.app.github.LedgerEntry
 import com.beanbeaver.app.receipt.ReceiptPipeline
 import com.beanbeaver.app.receipt.ScanStatus
 import com.beanbeaver.app.receipt.label
@@ -87,6 +94,7 @@ import uniffi.bb_receipt_ffi.ScanTimings
 @Composable
 fun BeanBeaverApp(
     pipeline: ReceiptPipeline = viewModel(),
+    githubVm: GitHubSyncViewModel = viewModel(),
 ) {
     val status by pipeline.status.collectAsStateWithLifecycle()
     val progress by pipeline.scanProgress.collectAsStateWithLifecycle()
@@ -96,11 +104,31 @@ fun BeanBeaverApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val ghConfigured by githubVm.configured.collectAsStateWithLifecycle()
+    val ghConnected by githubVm.connected.collectAsStateWithLifecycle()
+    val ghAccount by githubVm.account.collectAsStateWithLifecycle()
+    val exportRunning by githubVm.exportRunning.collectAsStateWithLifecycle()
+    val exportMessage by githubVm.exportMessage.collectAsStateWithLifecycle()
+    val exportResult by githubVm.exportResult.collectAsStateWithLifecycle()
+
     // Full-screen review of the original photo, opened from the result screen.
     var showOriginalReceipt by rememberSaveable { mutableStateOf(false) }
-    // The Android twin of iOS Settings (sample scan, skip-orientation, versions).
+    // The Android twin of iOS Settings (sync, ledger prefs, scanning, debug, about).
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showGitHubSettings by rememberSaveable { mutableStateOf(false) }
+    var showDebug by rememberSaveable { mutableStateOf(false) }
     val image = capturedImage
+
+    // Sub-screens as boolean-gated early returns (a small nav "stack"): GitHub and
+    // Debug sit above Settings, so backing out of them returns to Settings.
+    if (showGitHubSettings) {
+        GitHubSettingsScreen(vm = githubVm, onBack = { showGitHubSettings = false })
+        return
+    }
+    if (showDebug) {
+        DebugInfoScreen(onBack = { showDebug = false })
+        return
+    }
     if (showOriginalReceipt && image != null) {
         OriginReceiptScreen(imageData = image, onBack = { showOriginalReceipt = false })
         return
@@ -113,6 +141,10 @@ fun BeanBeaverApp(
                 showSettings = false
                 pipeline.scanBundledSample()
             },
+            githubConnected = ghConnected,
+            githubAccount = ghAccount,
+            onOpenGitHub = { showGitHubSettings = true },
+            onOpenDebug = { showDebug = true },
             onBack = { showSettings = false },
         )
         return
@@ -172,6 +204,8 @@ fun BeanBeaverApp(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
                     },
+                    exportReady = ghConfigured,
+                    onExport = { showGitHubSettings = true },
                     onSettings = { showSettings = true },
                 )
                 is ScanStatus.Scanning -> ScanningPane(
@@ -185,10 +219,41 @@ fun BeanBeaverApp(
                 is ScanStatus.Done -> ResultPane(
                     result = s.result,
                     wallMs = s.wallMs,
+                    exportRunning = exportRunning,
+                    exportMessage = exportMessage,
+                    onExport = {
+                        if (ghConfigured) {
+                            githubVm.export(LedgerEntry.make(s.result, capturedImage, s.wallMs))
+                        } else {
+                            showGitHubSettings = true
+                        }
+                    },
                     onScanAnother = { pipeline.reset() },
                 )
             }
         }
+    }
+
+    // Export outcome (PR opened / failed), surfaced over whatever's on screen.
+    exportResult?.let { res ->
+        AlertDialog(
+            onDismissRequest = { githubVm.clearExportResult() },
+            title = { Text(res.title) },
+            text = { Text(res.message) },
+            confirmButton = {
+                if (res.url != null) {
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(res.url))) }
+                        githubVm.clearExportResult()
+                    }) { Text("Open") }
+                } else {
+                    TextButton(onClick = { githubVm.clearExportResult() }) { Text("OK") }
+                }
+            },
+            dismissButton = if (res.url != null) {
+                { TextButton(onClick = { githubVm.clearExportResult() }) { Text("OK") } }
+            } else null,
+        )
     }
 }
 
@@ -198,6 +263,8 @@ fun BeanBeaverApp(
 private fun HomePane(
     onScan: () -> Unit,
     onPickPhoto: () -> Unit,
+    exportReady: Boolean,
+    onExport: () -> Unit,
     onSettings: () -> Unit,
 ) {
     Column(
@@ -235,6 +302,17 @@ private fun HomePane(
                 Spacer(Modifier.width(8.dp))
                 Text("Import from Photos", fontWeight = FontWeight.SemiBold)
             }
+            OutlinedButton(
+                onClick = onExport,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (exportReady) "Export: GitHub" else "Export: set up GitHub",
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             BbQuietButton(text = "Settings", onClick = onSettings)
         }
 
@@ -250,8 +328,8 @@ private fun HomePane(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                "Receipts are scanned and parsed on your device. Nothing leaves it — " +
-                    "sync isn't in this Android preview yet.",
+                "Receipts are scanned and parsed on your device. Nothing leaves it unless you " +
+                    "export — and then only to your own GitHub ledger.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -359,11 +437,34 @@ private fun FailedPane(message: String, onRetry: () -> Unit) {
 private fun ResultPane(
     result: ReceiptResult,
     wallMs: Double,
+    exportRunning: Boolean,
+    exportMessage: String?,
+    onExport: () -> Unit,
     onScanAnother: () -> Unit,
 ) {
     ReceiptCard(result = result, wallMs = wallMs)
 
-    Button(onClick = onScanAnother, modifier = Modifier.fillMaxWidth()) {
+    Button(
+        onClick = onExport,
+        enabled = !exportRunning,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (exportRunning) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(exportMessage ?: "Exporting…", maxLines = 1)
+        } else {
+            Icon(Icons.Default.CloudUpload, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Export to GitHub", fontWeight = FontWeight.SemiBold)
+        }
+    }
+
+    OutlinedButton(onClick = onScanAnother, modifier = Modifier.fillMaxWidth()) {
         Text("Scan another", fontWeight = FontWeight.SemiBold)
     }
 }

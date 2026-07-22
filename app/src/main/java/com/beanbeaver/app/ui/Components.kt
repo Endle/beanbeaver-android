@@ -2,6 +2,7 @@ package com.beanbeaver.app.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,6 +65,38 @@ fun BbQuietButton(
         ),
     ) {
         Text(text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * An iOS-style grouped section: an optional uppercase header, a rounded [BbCard]
+ * of rows, and an optional quiet footer explaining the setting. Shared by the
+ * Settings, GitHub-sync, and debug-info screens so they read as one system.
+ */
+@Composable
+fun SettingsSection(
+    title: String? = null,
+    footer: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (title != null) {
+            Text(
+                title.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+        BbCard(content = content)
+        if (footer != null) {
+            Text(
+                footer,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
     }
 }
 

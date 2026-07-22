@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.beanbeaver.app.debug.DebugInfoStore
 import com.beanbeaver.bbreceiptkit.ReceiptScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -99,21 +100,26 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
             progressJob = launch { animateEstimatedProgress(skipOrientation.value) }
 
             val account = creditCardAccount
+            val app = getApplication<Application>()
+            val currency = LedgerFormatPrefs.currency(app)
+            val taxAccount = LedgerFormatPrefs.taxAccount(app)
             val started = System.nanoTime()
             try {
                 val result = withContext(Dispatchers.Default) {
-                    val session = session(getApplication())
-                    ReceiptScanner.scan(session, imageData, account)
+                    val session = session(app)
+                    ReceiptScanner.scan(session, imageData, account, currency, taxAccount)
                 }
                 val wallMs = (System.nanoTime() - started) / 1_000_000.0
                 progressJob?.cancel()
                 _scanProgress.value = 1.0
                 rememberScanDuration(wallMs)
                 logTimings(result, wallMs)
+                DebugInfoStore.recordSuccess(app, result, wallMs)
                 _status.value = ScanStatus.Done(result, wallMs)
             } catch (t: Throwable) {
                 progressJob?.cancel()
                 Log.e(TAG, "scan failed", t)
+                DebugInfoStore.recordFailure(app, t)
                 _status.value = ScanStatus.Failed(t.message ?: t.toString())
             }
         }
