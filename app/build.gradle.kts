@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Upload-signing config for Play. Kept out of git: create keystore.properties
+// (see keystore.properties.example) pointing at your upload keystore. When it's
+// absent — CI, contributors, plain debug builds — the release variant simply
+// stays unsigned and you sign/upload manually. Play App Signing holds the real
+// app-signing key; this is only the resettable upload key.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.isFile) keystorePropsFile.inputStream().use { load(it) }
+}
+val hasUploadKeystore = keystorePropsFile.isFile &&
+    keystoreProps.getProperty("storeFile") != null
 
 // Prefer android/models/ (standalone); fall back to sibling iOS models/ when
 // this tree still lives next to beanbeaver-ios.
@@ -72,16 +86,34 @@ android {
         versionCode = 1
         versionName = "0.1.0-android"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // MVP ships arm64-v8a only (ort has no x86_64-linux-android prebuild).
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")
+
+        // MVP ships arm64-v8a only (ort has no x86_64-linux-android prebuild).
+        // debugSymbolLevel FULL uploads native (ORT/Rust) symbols to Play so
+        // native crashes in the on-device scan are symbolicated in the console.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+            debugSymbolLevel = "FULL"
+        }
+    }
+
+    signingConfigs {
+        if (hasUploadKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (hasUploadKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -103,8 +135,11 @@ android {
     }
     packaging {
         jniLibs {
-            // ORT + UniFFI both ship .so; keep debug symbols out of release later if needed.
-            useLegacyPackaging = true
+            // 16 KB page-size support (required by Play for apps targeting
+            // Android 15+): store .so uncompressed and page-aligned, extracted
+            // by the installer rather than at runtime. Pairs with
+            // extractNativeLibs="false" in the manifest.
+            useLegacyPackaging = false
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

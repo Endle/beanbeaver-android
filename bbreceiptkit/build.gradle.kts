@@ -35,6 +35,7 @@ android {
 
 dependencies {
     // UniFFI 0.28 Kotlin bindings use JNA. The Android AAR ships the right
-    // native loader pieces; plain jar is not enough on-device.
-    api("net.java.dev.jna:jna:5.15.0@aar")
+    // native loader pieces; plain jar is not enough on-device. 5.17+ ships a
+    // 16 KB-aligned libjnidispatch.so (required by Play for Android 15+ targets).
+    api("net.java.dev.jna:jna:5.17.0@aar")
 }

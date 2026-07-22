@@ -13,6 +13,11 @@
 /models/*.onnx
 *.apk
 *.aab
+# Upload-signing secrets — never commit. Config lives in keystore.properties;
+# the keystore itself is a *.jks/*.keystore. See keystore.properties.example.
+/keystore.properties
+*.jks
+*.keystore
 *.iml
 .idea/
 .DS_Store

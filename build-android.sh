@@ -117,10 +117,13 @@ rm -rf "$WORK"; mkdir -p "$WORK"
       echo "error: missing linker $linker (API $ANDROID_API?)" >&2
       exit 1
     fi
+    # max-page-size=16384: 16 KB-align the .so so Play accepts it on Android 15+.
+    # (NDK r27+ lld already defaults to this; kept explicit for older NDKs.)
     cat <<EOF
 [target.$target]
 linker = "$linker"
 ar = "$LLVM/bin/llvm-ar"
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
 
 EOF
   done

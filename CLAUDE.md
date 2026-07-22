@@ -51,6 +51,28 @@ One-time SDK setup (Android Studio SDK Manager / Device Manager): install the **
 an **arm64-v8a** system image, and create an AVD. `onnxruntime` is **statically linked**
 into `libbb_receipt_ffi.so` — there's no separate `libonnxruntime.so`.
 
+### Release build for Play (AAB)
+
+Play needs a **signed `.aab`**, not an APK:
+
+```bash
+cp keystore.properties.example keystore.properties   # then fill in real values
+./build-android.sh                                    # PROFILE=release (default)
+./gradlew :app:bundleRelease                          # → app/build/outputs/bundle/release/app-release.aab
+```
+
+- Signing reads `keystore.properties` (git-ignored; see `keystore.properties.example`).
+  Without it the release variant builds **unsigned**. Enroll in **Play App Signing** so
+  the upload key is resettable.
+- Every upload needs a unique, higher `versionCode` (`app/build.gradle.kts`).
+- 16 KB page-size support is **mandatory** for Android 15+ targets: `useLegacyPackaging =
+  false`, `extractNativeLibs="false"`, JNA ≥5.17, and the `max-page-size=16384` link arg
+  in `build-android.sh` — all already wired. Verify with
+  `zipalign -c -P 16 -v 4 app-release.aab` or Android Studio's APK Analyzer.
+- Console-side (not in this repo): privacy-policy URL (host `PRIVACY.md`), Data safety
+  form, content rating, target-audience + financial-app declarations, and store-listing
+  assets (512² icon, 1024×500 feature graphic, ≥2 screenshots).
+
 ### Gotchas (already cost time — don't relearn)
 
 - **`build-android.sh` host-PATH split (keep it).** The script prepends the NDK's
@@ -59,10 +81,12 @@ into `libbb_receipt_ffi.so` — there's no separate `libonnxruntime.so`.
   (`HOST_PATH`, Apple `/usr/bin/clang`) or it fails with `library 'clang_rt.osx' not found`.
   Android target builds keep the NDK on `PATH`. If a stale build cached the bad
   `ort-sys` host output, bust just it: `cargo clean -p ort-sys`.
-- **16 KB page-size images** (e.g. API 35+ `ps16k`): a launch dialog warns that
-  `libbb_receipt_ffi.so`, `libc++_shared.so`, JNA `libjnidispatch.so`, and an AndroidX
-  lib aren't 16 KB-aligned. It **runs anyway** in compat mode. Real fix for Play Store /
-  16 KB devices: JNA ≥5.17, `-Wl,-z,max-page-size=16384`, refresh AndroidX. Not a blocker.
+- **16 KB page-size alignment (now done — required, not optional).** Since Nov 2025 Play
+  rejects new apps/updates targeting Android 15+ whose `.so`s aren't 16 KB-aligned. Fixed
+  here via JNA ≥5.17, the `max-page-size=16384` link arg in `build-android.sh`,
+  `useLegacyPackaging = false`, and `extractNativeLibs="false"`. If a `ps16k` image still
+  warns at launch after a clean rebuild, re-check those four. Older AndroidX bumps may
+  also be needed as the Compose BOM advances.
 
 ## Conventions & open items
 
