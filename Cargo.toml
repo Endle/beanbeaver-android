@@ -17,7 +17,11 @@ name = "batch_e2e"
 path = "src/bin/batch_e2e.rs"
 
 [dependencies]
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.3.3" }
+# Jumps v0.3.3 → v0.6.0 in one shot (Android is still early): v0.5.0 made
+# currency + tax_account configurable on `scan` (breaking), and v0.6.0 reshaped
+# ScanTimings into the shared `Phase` enum + `[PhaseSpan]` span list (+ a `decode`
+# span). Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.6.0" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }

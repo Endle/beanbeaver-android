@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.bb_receipt_ffi.OcrSession
+import uniffi.bb_receipt_ffi.Phase
 import java.io.File
 
 /**
@@ -123,11 +124,12 @@ object BatchRunner {
                             .put(
                                 "timings",
                                 JSONObject()
-                                    .put("prepMs", r.timings.prepMs)
-                                    .put("detectMs", r.timings.detectMs)
-                                    .put("classifyMs", r.timings.classifyMs)
-                                    .put("recognizeMs", r.timings.recognizeMs)
-                                    .put("parseMs", r.timings.parseMs)
+                                    .put("decodeMs", r.timings.ms(Phase.DECODE))
+                                    .put("prepMs", r.timings.ms(Phase.PREP))
+                                    .put("detectMs", r.timings.ms(Phase.DETECT))
+                                    .put("classifyMs", r.timings.ms(Phase.CLASSIFY))
+                                    .put("recognizeMs", r.timings.ms(Phase.RECOGNIZE))
+                                    .put("parseMs", r.timings.ms(Phase.PARSE))
                                     .put("totalMs", r.timings.totalMs),
                             )
                             .put("error", JSONObject.NULL),

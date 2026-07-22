@@ -57,6 +57,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.beanbeaver.app.BuildConfig
 import com.beanbeaver.app.receipt.ReceiptPipeline
 import com.beanbeaver.app.receipt.ScanStatus
+import com.beanbeaver.app.receipt.label
+import com.beanbeaver.app.receipt.totalMs
 import uniffi.bb_receipt_ffi.ScanTimings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -345,16 +347,11 @@ private fun ResultPane(
  */
 @Composable
 private fun TimingBreakdown(timings: ScanTimings, wallMs: Double) {
-    val phases = remember(timings) {
-        listOf(
-            "Prepare image" to timings.prepMs,
-            "Detect text" to timings.detectMs,
-            "Orientation" to timings.classifyMs,
-            "Recognize text" to timings.recognizeMs,
-            "Parse receipt" to timings.parseMs,
-        )
-    }
-    val maxMs = remember(phases) { phases.maxOf { it.second }.coerceAtLeast(1.0) }
+    // Iterate the core's ordered phase spans directly: new phases (the `decode`
+    // span, future app-side spans) show up with no edit here, and the labels
+    // come from the shared taxonomy so they match iOS verbatim.
+    val phases = remember(timings) { timings.spans.map { it.phase.label() to it.ms } }
+    val maxMs = remember(phases) { (phases.maxOfOrNull { it.second } ?: 1.0).coerceAtLeast(1.0) }
     val overheadMs = (wallMs - timings.totalMs).coerceAtLeast(0.0)
 
     Card {

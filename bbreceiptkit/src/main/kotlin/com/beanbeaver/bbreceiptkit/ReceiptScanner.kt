@@ -29,12 +29,18 @@ object ReceiptScanner {
      * Scan encoded image bytes (JPEG/PNG) using the current local date for date
      * inference / the placeholder date.
      *
+     * `currency` is the beancount commodity for every amount and `taxAccount`
+     * is where the tax posting lands. Since v0.5.0 the core no longer hard-codes
+     * Canadian defaults; this MVP passes CAD / HST until Android grows settings.
+     *
      * UniFFI 0.28 maps Rust `Vec<u8>` → Kotlin `ByteArray` for this crate.
      */
     fun scan(
         session: OcrSession,
         imageData: ByteArray,
         creditCardAccount: String,
+        currency: String = "CAD",
+        taxAccount: String = "Expenses:Tax:HST",
     ): ReceiptResult {
         val today = LocalDate.now()
         val date = DateYmd(
@@ -42,6 +48,6 @@ object ReceiptScanner {
             month = today.monthValue.toUInt(),
             day = today.dayOfMonth.toUInt(),
         )
-        return session.scan(imageData, date, creditCardAccount)
+        return session.scan(imageData, date, creditCardAccount, currency, taxAccount)
     }
 }
