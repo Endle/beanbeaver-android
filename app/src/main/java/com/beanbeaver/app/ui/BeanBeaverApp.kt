@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -44,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -128,6 +130,8 @@ fun BeanBeaverApp(
         }
     }
 
+    val startScan = rememberDocumentScanLauncher(onImage = { pipeline.scan(it) })
+
     val isDone = status is ScanStatus.Done
 
     Scaffold(
@@ -162,6 +166,7 @@ fun BeanBeaverApp(
         ) {
             when (val s = status) {
                 is ScanStatus.Idle -> HomePane(
+                    onScan = startScan,
                     onPickPhoto = {
                         photoPicker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -191,6 +196,7 @@ fun BeanBeaverApp(
 
 @Composable
 private fun HomePane(
+    onScan: () -> Unit,
     onPickPhoto: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -214,6 +220,14 @@ private fun HomePane(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Button(
+                onClick = onScan,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Scan a Receipt", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
                 onClick = onPickPhoto,
                 modifier = Modifier.fillMaxWidth(),
             ) {

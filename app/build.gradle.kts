@@ -131,5 +131,10 @@ dependencies {
     // Photo picker (Android 13+ system picker; backport via activity)
     implementation("androidx.activity:activity-ktx:1.9.3")
 
+    // On-device document scanner (guided capture + edge-detect/deskew), the
+    // Android analog of iOS VisionKit. Delivered via Play services; the capture
+    // UI runs in a Play-services activity, so no CAMERA permission is needed here.
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
