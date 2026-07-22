@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import uniffi.bb_receipt_ffi.OcrSession
 import uniffi.bb_receipt_ffi.ReceiptResult
 import kotlin.coroutines.coroutineContext
 
@@ -58,7 +57,7 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
      * it forces the next scan to reload the OCR session with/without the cls
      * model. Fine for upright receipts; hurts 180°-rotated lines.
      */
-    private val _skipOrientation = MutableStateFlow(prefsSkipOrientation(app))
+    private val _skipOrientation = MutableStateFlow(OcrSessionProvider.skipOrientation(app))
     val skipOrientation: StateFlow<Boolean> = _skipOrientation.asStateFlow()
 
     fun setSkipOrientation(value: Boolean) {
@@ -106,7 +105,7 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
             val started = System.nanoTime()
             try {
                 val result = withContext(Dispatchers.Default) {
-                    val session = session(app)
+                    val session = OcrSessionProvider.loaded(app)
                     ReceiptScanner.scan(session, imageData, account, currency, taxAccount)
                 }
                 val wallMs = (System.nanoTime() - started) / 1_000_000.0
@@ -224,28 +223,5 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
         private const val PREFS_NAME = "beanbeaver"
         private const val KEY_SKIP_ORIENTATION = "skipOrientationCheck"
         private const val KEY_LAST_SCAN_MS = "lastScanWallMs"
-
-        @Volatile
-        private var cached: OcrSession? = null
-
-        @Volatile
-        private var loadedWithOrientationCls: Boolean? = null
-
-        private fun session(context: Context): OcrSession {
-            val useCls = !prefsSkipOrientation(context)
-            cached?.let { if (loadedWithOrientationCls == useCls) return it }
-            synchronized(this) {
-                cached?.let { if (loadedWithOrientationCls == useCls) return it }
-                val dir = ModelStore.ensureModels(context)
-                val s = ReceiptScanner.load(dir, useOrientationCls = useCls)
-                cached = s
-                loadedWithOrientationCls = useCls
-                return s
-            }
-        }
-
-        private fun prefsSkipOrientation(context: Context): Boolean =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(KEY_SKIP_ORIENTATION, false)
     }
 }

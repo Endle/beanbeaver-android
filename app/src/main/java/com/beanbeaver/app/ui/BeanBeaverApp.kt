@@ -2,9 +2,6 @@ package com.beanbeaver.app.ui
 
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -58,7 +55,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.beanbeaver.app.github.GitHubSyncViewModel
 import com.beanbeaver.app.github.LedgerEntry
+import com.beanbeaver.app.receipt.ReceiptBatch
 import com.beanbeaver.app.receipt.ReceiptPipeline
 import com.beanbeaver.app.receipt.ScanStatus
 import com.beanbeaver.app.receipt.label
@@ -82,9 +79,6 @@ import com.beanbeaver.app.receipt.totalMs
 import com.beanbeaver.app.ui.theme.BbAccent
 import com.beanbeaver.app.ui.theme.BbAccentSoft
 import com.beanbeaver.app.ui.theme.groupedBackground
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
@@ -95,6 +89,7 @@ import uniffi.bb_receipt_ffi.ScanTimings
 fun BeanBeaverApp(
     pipeline: ReceiptPipeline = viewModel(),
     githubVm: GitHubSyncViewModel = viewModel(),
+    batch: ReceiptBatch = viewModel(),
 ) {
     val status by pipeline.status.collectAsStateWithLifecycle()
     val progress by pipeline.scanProgress.collectAsStateWithLifecycle()
@@ -102,7 +97,6 @@ fun BeanBeaverApp(
     val capturedImage by pipeline.capturedImage.collectAsStateWithLifecycle()
     val skipOrientation by pipeline.skipOrientation.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     val ghConfigured by githubVm.configured.collectAsStateWithLifecycle()
     val ghConnected by githubVm.connected.collectAsStateWithLifecycle()
@@ -117,6 +111,9 @@ fun BeanBeaverApp(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showGitHubSettings by rememberSaveable { mutableStateOf(false) }
     var showDebug by rememberSaveable { mutableStateOf(false) }
+    // The photo-library batch workspace (multi-receipt import), a peer of the
+    // single-scan flow rather than a step within it.
+    var showBatch by rememberSaveable { mutableStateOf(false) }
     val image = capturedImage
 
     // Sub-screens as boolean-gated early returns (a small nav "stack"): GitHub and
@@ -131,6 +128,20 @@ fun BeanBeaverApp(
     }
     if (showOriginalReceipt && image != null) {
         OriginReceiptScreen(imageData = image, onBack = { showOriginalReceipt = false })
+        return
+    }
+    if (showBatch) {
+        BatchImportScreen(
+            batch = batch,
+            exportRunning = exportRunning,
+            exportMessage = exportMessage,
+            githubConfigured = ghConfigured,
+            onExport = { entries ->
+                githubVm.export(entries) { success -> if (success) batch.removeParsed() }
+            },
+            onConfigureGitHub = { showGitHubSettings = true },
+            onBack = { showBatch = false },
+        )
         return
     }
     if (showSettings) {
@@ -148,18 +159,6 @@ fun BeanBeaverApp(
             onBack = { showSettings = false },
         )
         return
-    }
-
-    val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val bytes = withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            }
-            if (bytes != null) pipeline.scan(bytes)
-        }
     }
 
     val startScan = rememberDocumentScanLauncher(onImage = { pipeline.scan(it) })
@@ -199,11 +198,7 @@ fun BeanBeaverApp(
             when (val s = status) {
                 is ScanStatus.Idle -> HomePane(
                     onScan = startScan,
-                    onPickPhoto = {
-                        photoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
+                    onImportPhotos = { showBatch = true },
                     exportReady = ghConfigured,
                     onExport = { showGitHubSettings = true },
                     onSettings = { showSettings = true },
@@ -262,7 +257,7 @@ fun BeanBeaverApp(
 @Composable
 private fun HomePane(
     onScan: () -> Unit,
-    onPickPhoto: () -> Unit,
+    onImportPhotos: () -> Unit,
     exportReady: Boolean,
     onExport: () -> Unit,
     onSettings: () -> Unit,
@@ -295,7 +290,7 @@ private fun HomePane(
                 Text("Scan a Receipt", fontWeight = FontWeight.SemiBold)
             }
             OutlinedButton(
-                onClick = onPickPhoto,
+                onClick = onImportPhotos,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.PhotoLibrary, contentDescription = null)
@@ -474,7 +469,7 @@ private fun ResultPane(
  * generated beancount + per-phase timings. The Kotlin twin of iOS `ReceiptCard`.
  */
 @Composable
-private fun ReceiptCard(result: ReceiptResult, wallMs: Double) {
+internal fun ReceiptCard(result: ReceiptResult, wallMs: Double) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         BbCard {
             ReceiptHeader(result)

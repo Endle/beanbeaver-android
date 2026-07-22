@@ -224,18 +224,27 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Export
 
-    fun export(entry: LedgerEntry) {
-        if (_exportRunning.value || !isConfigured) return
+    fun export(entry: LedgerEntry) = export(listOf(entry))
+
+    /**
+     * File one or more receipts into the ledger repo as a single pull request (the
+     * whole batch goes onto one branch). [onComplete] reports success so a batch
+     * caller can drain the parsed drafts; it's a no-op for the single-scan path.
+     */
+    fun export(entries: List<LedgerEntry>, onComplete: (Boolean) -> Unit = {}) {
+        if (_exportRunning.value || !isConfigured || entries.isEmpty()) return
         val t = token ?: return
         _exportRunning.value = true
         _exportMessage.value = null
         viewModelScope.launch {
+            var ok = false
             try {
                 val cfg = GitHubLedger.Config(_owner.value.trim(), _repo.value.trim(), t)
-                val url = GitHubLedger.openPullRequest(cfg, listOf(entry)) { message ->
+                val url = GitHubLedger.openPullRequest(cfg, entries) { message ->
                     _exportMessage.value = message
                 }
                 _exportResult.value = ExportResult("Pull request opened", url, url, isError = false)
+                ok = true
             } catch (e: Exception) {
                 val message = e.message ?: "Export failed."
                 DebugInfoStore.recordExportFailure(getApplication(), "export to GitHub", message)
@@ -243,6 +252,7 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 _exportRunning.value = false
                 _exportMessage.value = null
+                onComplete(ok)
             }
         }
     }
