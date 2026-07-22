@@ -2,6 +2,7 @@ package com.beanbeaver.app.receipt
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.beanbeaver.bbreceiptkit.ReceiptScanner
@@ -89,12 +90,32 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
                 val wallMs = (System.nanoTime() - started) / 1_000_000.0
                 progressJob?.cancel()
                 _scanProgress.value = 1.0
+                logTimings(result, wallMs)
                 _status.value = ScanStatus.Done(result, wallMs)
             } catch (t: Throwable) {
                 progressJob?.cancel()
+                Log.e(TAG, "scan failed", t)
                 _status.value = ScanStatus.Failed(t.message ?: t.toString())
             }
         }
+    }
+
+    /**
+     * Emit the per-phase scan timings to logcat so an interactive scan (photo
+     * picker or "run bundled sample") is as greppable as the headless
+     * [BatchRunner] path. Same Phase taxonomy the result-screen TimingBreakdown
+     * renders; overhead = wall − Rust total (JNI + first-scan model load).
+     */
+    private fun logTimings(result: ReceiptResult, wallMs: Double) {
+        val t = result.timings
+        val phases = t.spans.joinToString(" ") { "${it.phase.label()}=%.0f".format(it.ms) }
+        val overheadMs = (wallMs - t.totalMs).coerceAtLeast(0.0)
+        Log.i(
+            TAG,
+            "scan ok merchant=${result.merchant} total=${result.total} " +
+                "wallMs=%.0f rustTotalMs=%.0f overheadMs=%.0f | %s"
+                    .format(wallMs, t.totalMs, overheadMs, phases),
+        )
     }
 
     private suspend fun animateEstimatedProgress() {
@@ -125,6 +146,8 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        private const val TAG = "ReceiptPipeline"
+
         @Volatile
         private var cached: OcrSession? = null
 
