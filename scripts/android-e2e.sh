@@ -82,12 +82,23 @@ else
 fi
 
 REMOTE_BASE="/sdcard/Android/data/$PKG/files"
-REMOTE_IN="$REMOTE_BASE/batch_in"
 REMOTE_OUT="$REMOTE_BASE/batch_out.json"
 
-echo "── push fixtures → $REMOTE_IN ──"
-"$ADB" shell "rm -rf '$REMOTE_IN' '$REMOTE_OUT'; mkdir -p '$REMOTE_IN'"
-"$ADB" push "$SEL/." "$REMOTE_IN/" >/dev/null
+# Deliver fixtures into the app's INTERNAL files/batch_in via run-as, not into
+# external storage. Files that adb (the `shell` user) pushes into
+# Android/data/<pkg>/files/ are NOT readable by the app process (scoped-storage /
+# SELinux: the app can write its own files there but can't enumerate a
+# shell-created subdir), so BatchRunner would see 0 images. run-as writes as the
+# app uid, so BatchRunner's internal-dir fallback (File(filesDir,"batch_in"))
+# picks them up. batch_out.json still lands in external files (getExternalFilesDir
+# is first there) and we pull it below. Requires a debuggable (debug) APK.
+echo "── deliver fixtures → app-internal files/batch_in (run-as) ──"
+"$ADB" shell "run-as $PKG sh -c 'rm -rf files/batch_in; mkdir -p files/batch_in'"
+"$ADB" shell "rm -rf '$REMOTE_BASE/batch_in' '$REMOTE_OUT'" 2>/dev/null || true
+for jpg in "$SEL"/*.jpg; do
+  name="$(basename "$jpg")"
+  cat "$jpg" | "$ADB" shell "run-as $PKG sh -c 'cat > files/batch_in/$name'"
+done
 
 echo "── launch autoRunBatch ($count scans) ──"
 "$ADB" shell am force-stop "$PKG" 2>/dev/null || true
