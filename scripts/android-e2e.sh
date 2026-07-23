@@ -13,8 +13,8 @@ set -euo pipefail
 
 FIXTURES="${1:?usage: android-e2e.sh <receipts_e2e-dir> [--all|--pilot]}"
 MODE="${2:---all}"
-PKG="com.beanbeaver.app"
-ACTIVITY="com.beanbeaver.app/.MainActivity"
+PKG="com.zhenbo.beanbeaver"
+ACTIVITY="com.zhenbo.beanbeaver/.MainActivity"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ANDROID_ROOT="$(cd "$HERE/.." && pwd)"
 WORK="${WORK:-${TMPDIR:-/tmp}/bb-android-e2e}"

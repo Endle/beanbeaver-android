@@ -72,14 +72,14 @@ val syncOcrModels by tasks.registering(Copy::class) {
 }
 
 android {
-    namespace = "com.beanbeaver.app"
+    namespace = "com.zhenbo.beanbeaver"
     compileSdk = 35
     // Pin build-tools for reproducible builds; install this version via the
     // Android Studio SDK Manager (or `sdkmanager "build-tools;35.0.0"`).
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "com.beanbeaver.app"
+        applicationId = "com.zhenbo.beanbeaver"
         // Android 14+ — heavy on-device ONNX; older phones aren't a realistic target.
         minSdk = 34
         targetSdk = 35
