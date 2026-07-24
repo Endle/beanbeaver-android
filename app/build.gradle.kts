@@ -73,18 +73,20 @@ val syncOcrModels by tasks.registering(Copy::class) {
 
 android {
     namespace = "com.zhenbo.beanbeaver"
-    compileSdk = 35
+    compileSdk = 36
     // Pin build-tools for reproducible builds; install this version via the
-    // Android Studio SDK Manager (or `sdkmanager "build-tools;35.0.0"`).
-    buildToolsVersion = "35.0.0"
+    // Android Studio SDK Manager (or `sdkmanager "build-tools;36.0.0"`).
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "com.zhenbo.beanbeaver"
         // Android 14+ — heavy on-device ONNX; older phones aren't a realistic target.
         minSdk = 34
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-android"
+        // Android 16. Play requires new apps/updates to target within one year
+        // of the latest release (API 36 required from 2026-08-30).
+        targetSdk = 36
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")
