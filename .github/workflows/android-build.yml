@@ -1,0 +1,138 @@
+name: Android build
+
+# Android twin of beanbeaver-ios's ios-build.yml. Same shape — cross-compile the
+# Rust core, build the app, then run the shared receipt fixture through the real
+# pipeline and grade it with scripts/compare-e2e.py — with one difference worth
+# understanding before you try to "fix" it:
+#
+#   THERE IS NO EMULATOR JOB, and it isn't an oversight.
+#   The app is arm64-v8a only, because `ort` publishes no x86_64-linux-android
+#   prebuilt (see build-android.sh). GitHub's x86_64 Linux runners are the only
+#   hosted runners with KVM, and they can't install an arm64-only APK. The
+#   Apple-Silicon macOS runners can't stand in either: Apple's Virtualization
+#   Framework has no nested virtualization, so HVF is unavailable inside the
+#   runner VM and an arm64 AVD dies with HV_UNSUPPORTED / SIGSEGV. Linux arm64
+#   runners have no KVM for the same Azure-side reason.
+#   Running the app for real therefore needs a self-hosted arm64 Mac runner or a
+#   device farm (Firebase Test Lab). Locally it is one command:
+#       ./scripts/android-e2e.sh "$(./scripts/e2e-fixtures.sh)" --pilot
+#
+# What the "Host E2E" step below buys instead: the same core, the same models,
+# the same fixture and the same grader as the on-device harness — everything
+# except the JNI seam. It is the runtime gate that catches a core-tag bump that
+# quietly changes a parse. The JNI seam itself is still only proven by running
+# the APK on real arm64 hardware.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build APK + unit tests + host E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Android Studio's bundled JBR is 21 locally; match it here. AGP 8.13
+      # needs >= 17, and the modules compile to jvmTarget 17 either way.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Rust + Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # `ort` downloads a prebuilt libonnxruntime into this cache — once for the
+      # aarch64-linux-android .so, once for the host batch_e2e binary.
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ort.pyke.io
+          key: ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ort-${{ runner.os }}-
+
+      # ~19 MB of ONNX weights pulled from a fixed release tag, so the key only
+      # has to change when the script points at a different release.
+      - name: Cache OCR models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ocr-models-${{ hashFiles('scripts/fetch-models.sh') }}
+
+      - name: Fetch OCR models
+        run: ./scripts/fetch-models.sh
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # compileSdk 36 + buildToolsVersion 36.0.0 are pinned in
+      # app/build.gradle.kts; the runner image doesn't necessarily ship that
+      # exact build-tools revision, and AGP won't fetch it.
+      - name: Install the pinned SDK packages
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;36.0.0"
+
+      # Cross-compiles bb-receipt-ffi for aarch64-linux-android and regenerates
+      # the UniFFI Kotlin. Both are git-ignored, so nothing in bbreceiptkit/ even
+      # compiles until this runs. Debug profile: quicker, and enough to prove the
+      # tree is green. This is also the step that fails loudly when the pinned
+      # core tag moves and ReceiptScanner.kt wasn't adapted.
+      - name: Build core (.so + UniFFI Kotlin bindings)
+        run: ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:?}" PROFILE=debug ./build-android.sh
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Context-free JVM logic: the .xlsx writer, amount/price normalization,
+      # display formatting. No emulator, no native library.
+      - name: JVM unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Android Lint
+        run: ./gradlew :app:lintDebug
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-results-debug
+          path: app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+
+      # The runtime gate. batch_e2e is the host twin of the on-device
+      # BatchRunner: same OcrSession, same ledger defaults, same batch_out.json
+      # shape, graded by the same compare-e2e.py the emulator harness uses.
+      # Release profile — a debug build of the image/OCR path is minutes slower
+      # per scan, and the cargo cache makes this a rebuild of one crate.
+      - name: Host E2E — scan the bundled fixture and grade it
+        run: |
+          set -euo pipefail
+          FIX=$(./scripts/e2e-fixtures.sh)
+          cargo run --release --bin batch_e2e -- \
+            --models models --in-dir "$FIX" --out "$FIX/batch_out.json"
+          python3 scripts/compare-e2e.py \
+            --results "$FIX/batch_out.json" --manifest "$FIX/manifest.json"

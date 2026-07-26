@@ -10,7 +10,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use bb_receipt_ffi::{DateYmd, OcrSession};
+use bb_receipt_ffi::{DateYmd, OcrSession, Phase, ScanTimings};
+
+/// Ledger defaults the app passes on every scan (see `ReceiptScanner.kt`);
+/// mirrored here so the host results are graded against the same parse the
+/// device would produce.
+const CURRENCY: &str = "CAD";
+const TAX_ACCOUNT: &str = "Expenses:Tax:HST";
+const CREDIT_CARD_ACCOUNT: &str = "Liabilities:CreditCard";
 
 fn main() {
     let mut models = PathBuf::from("models");
@@ -77,7 +84,9 @@ fn main() {
                 month: today.month,
                 day: today.day,
             },
-            "Liabilities:CreditCard".into(),
+            CREDIT_CARD_ACCOUNT.into(),
+            CURRENCY.into(),
+            TAX_ACCOUNT.into(),
         ) {
             Ok(r) => {
                 let wall_ms = started.elapsed().as_secs_f64() * 1e3;
@@ -157,6 +166,7 @@ fn success_json(name: &str, r: &bb_receipt_ffi::ReceiptResult, wall_ms: f64) -> 
       "warnings": [{warnings}],
       "wallMs": {wall_ms},
       "timings": {{
+        "decodeMs": {decode},
         "prepMs": {prep},
         "detectMs": {detect},
         "classifyMs": {classify},
@@ -168,7 +178,11 @@ fn success_json(name: &str, r: &bb_receipt_ffi::ReceiptResult, wall_ms: f64) -> 
     }}"#,
         name = json_str(name),
         merchant = json_str(&r.merchant),
-        date = r.date.as_ref().map(|d| json_str(d)).unwrap_or_else(|| "null".into()),
+        date = r
+            .date
+            .as_ref()
+            .map(|d| json_str(d))
+            .unwrap_or_else(|| "null".into()),
         placeholder = r.date_is_placeholder,
         total = json_str(&r.total),
         subtotal = r
@@ -184,13 +198,25 @@ fn success_json(name: &str, r: &bb_receipt_ffi::ReceiptResult, wall_ms: f64) -> 
         items = items.join(",\n"),
         warnings = warnings.join(","),
         wall_ms = wall_ms,
-        prep = r.timings.prep_ms,
-        detect = r.timings.detect_ms,
-        classify = r.timings.classify_ms,
-        recognize = r.timings.recognize_ms,
-        parse = r.timings.parse_ms,
-        total_ms = r.timings.total_ms,
+        decode = phase_ms(&r.timings, Phase::Decode),
+        prep = phase_ms(&r.timings, Phase::Prep),
+        detect = phase_ms(&r.timings, Phase::Detect),
+        classify = phase_ms(&r.timings, Phase::Classify),
+        recognize = phase_ms(&r.timings, Phase::Recognize),
+        parse = phase_ms(&r.timings, Phase::Parse),
+        total_ms = r.timings.spans.iter().map(|s| s.ms).sum::<f64>(),
     )
+}
+
+/// Milliseconds recorded for one phase. `ScanTimings` is an ordered span list
+/// (a phase the run skipped — `Classify` with `--no-orientation-cls` — is simply
+/// absent), so a missing phase reads as 0.0. Kotlin twin: `Timings.kt`'s `ms()`.
+fn phase_ms(t: &ScanTimings, phase: Phase) -> f64 {
+    t.spans
+        .iter()
+        .filter(|s| s.phase == phase)
+        .map(|s| s.ms)
+        .sum()
 }
 
 fn failure_json(name: &str, message: &str) -> String {
