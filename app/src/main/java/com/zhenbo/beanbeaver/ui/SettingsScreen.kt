@@ -234,7 +234,8 @@ fun SettingsScreen(
             SettingsSection(
                 title = "Scanning",
                 footer = "Skipping the orientation check trades correctness on upside-down text for ~22% faster " +
-                    "scans — safe for upright receipts. Takes effect on the next scan.",
+                    "scans — safe for upright receipts, so it is on by default. Turn it off if a scan misreads " +
+                    "rotated text. Takes effect on the next scan.",
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

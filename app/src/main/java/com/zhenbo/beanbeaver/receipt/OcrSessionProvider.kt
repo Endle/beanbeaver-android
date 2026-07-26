@@ -38,8 +38,12 @@ object OcrSessionProvider {
         }
     }
 
-    /** Whether the textline-orientation classifier is skipped (user setting). */
+    /**
+     * Whether the textline-orientation classifier is skipped (user setting).
+     * Defaults to skipping it: receipts photographed in the app are upright, so
+     * the classifier's ~22% of scan time buys nothing on the common path.
+     */
     fun skipOrientation(context: Context): Boolean =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_SKIP_ORIENTATION, false)
+            .getBoolean(KEY_SKIP_ORIENTATION, true)
 }
