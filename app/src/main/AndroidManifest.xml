@@ -22,8 +22,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.BeanBeaver"
-        android:extractNativeLibs="false">
+        android:theme="@style/Theme.BeanBeaver">
         <activity
             android:name=".MainActivity"
             android:exported="true"
