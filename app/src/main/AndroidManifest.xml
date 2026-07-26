@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No INTERNET permission: the MVP is fully on-device. The ML Kit document
-         scanner downloads its module through Google Play services (which holds
-         its own network permission), not this process. Re-add INTERNET when
-         GitHub sync lands. -->
+    <!-- Scanning and parsing are fully on-device; the network is used only by an
+         export the user asks for (GitHub sync in `github/`, which talks to
+         api.github.com over HttpURLConnection).
+
+         Declared explicitly even though play-services-mlkit merges the same
+         permission in transitively — relying on that merge means dropping or
+         swapping the ML Kit dependency silently breaks every export with a
+         SecurityException, with nothing failing at compile time. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Camera optional for a later document-scanner screen; photo picker needs none. -->
     <uses-feature
