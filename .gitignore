@@ -10,6 +10,9 @@
 /bbreceiptkit/src/main/kotlin/uniffi/bb_receipt_ffi/
 /bbreceiptkit/src/main/kotlin/com/beanbeaver/bbreceiptkit/BuildInfo.kt
 /app/src/main/assets/models/
+# Copied from the repo root by the syncLegalDocs Gradle task — the root files
+# are the originals; these are build output.
+/app/src/main/assets/legal/
 /models/*.onnx
 *.apk
 *.aab

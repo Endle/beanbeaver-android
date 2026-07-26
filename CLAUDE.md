@@ -10,8 +10,12 @@ The umbrella `~/src/bb/CLAUDE.md` owns the cross-repo **license firewall** and
 core-tag pinning rules (this repo is newer and not listed there yet — treat it as the
 "desktop/consumer" side that pins `core`). Don't repeat license detail here.
 
-**MVP scope:** system photo picker or bundled sample → scan → merchant / items /
-Beancount. Not yet: document camera, GitHub sync, SAF ledger, batch-import UI.
+**Scope:** document camera (ML Kit) or system photo picker or bundled sample →
+scan → merchant / items / Beancount → export (GitHub PR, or a Money Manager
+`.xlsx` via the share sheet), single or batch. Not yet: a Storage Access
+Framework ledger destination — iOS's equivalent Files-inbox backend is written
+but commented out ("disabled for now"), so this side deliberately has no twin
+until that comes back.
 
 ## Layout
 
@@ -22,9 +26,15 @@ Beancount. Not yet: document camera, GitHub sync, SAF ledger, batch-import UI.
 | `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Bins `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness). Pins the `bb-receipt-ffi` tag. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
-| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`. |
+| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `launch-timing.sh` (cold-launch latency on a real device). |
+| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting. |
 
-**Generated / git-ignored** (rebuilt by `build-android.sh` / Gradle): `bbreceiptkit/src/main/kotlin/uniffi/`, `bbreceiptkit/src/main/jniLibs/`, `app/src/main/assets/models/`, `target/`, `local.properties`.
+**Generated / git-ignored** (rebuilt by `build-android.sh` / Gradle): `bbreceiptkit/src/main/kotlin/uniffi/`, `bbreceiptkit/src/main/jniLibs/`, `app/src/main/assets/models/`, `app/src/main/assets/legal/`, `target/`, `local.properties`.
+
+`assets/legal/` is copied from the repo-root `PRIVACY.md` and
+`THIRD_PARTY_NOTICES.md` by the `syncLegalDocs` Gradle task, so the file a reader
+sees in the repo and the one the app shows can't drift — edit the root copies.
+Regenerate the notices' crate inventory whenever the core tag moves.
 
 ## Build & run on macOS (Apple Silicon)
 
@@ -90,10 +100,12 @@ cp keystore.properties.example keystore.properties   # then fill in real values
 
 ## Conventions & open items
 
-- **Core tag lag:** this repo pins `bb-receipt-ffi` behind iOS (was v0.3.3 vs iOS
-  v0.5.0). When bumping, update **this** `Cargo.toml` and the iOS root together, rerun
-  `./build-android.sh` here and `./build-xcframework.sh` in iOS. v0.5.0 is a breaking
-  FFI change (adds `currency` + `tax_account` to `scan`) — adapt `ReceiptScanner.kt`.
+- **Core tag:** in step with iOS at **v0.6.4**. When bumping, update **this**
+  `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
+  `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
+  first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
+  change means adapting `ReceiptScanner.kt` (as v0.5.0's `currency` +
+  `tax_account` did).
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
   is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.

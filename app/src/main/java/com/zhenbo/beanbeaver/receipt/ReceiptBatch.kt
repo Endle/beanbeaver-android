@@ -216,7 +216,7 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
         return _drafts.value.mapNotNull { draft ->
             val parsed = draft.state as? DraftState.Parsed ?: return@mapNotNull null
             val bytes = runCatching { ReceiptCaptureStore.file(app, draft.captureFilename).readBytes() }.getOrNull()
-            LedgerEntry.make(parsed.result, bytes, parsed.wallMs)
+            LedgerEntry.make(app, parsed.result, bytes, parsed.wallMs)
         }
     }
 

@@ -49,6 +49,24 @@ fun tagDisplay(tags: List<String>): TagDisplay {
     )
 }
 
+/**
+ * A byte count the way a storage row reads it ("4.2 MB"). Decimal units, matching
+ * what `ByteCountFormatter`'s `.file` style shows on iOS and what Android's own
+ * storage screens use — so "12 MB here" and "12 MB in Settings" agree.
+ */
+fun formatBytes(bytes: Long): String {
+    if (bytes < 1000) return "$bytes B"
+    val units = listOf("kB", "MB", "GB", "TB")
+    var value = bytes.toDouble() / 1000
+    var unit = 0
+    while (value >= 1000 && unit < units.lastIndex) {
+        value /= 1000
+        unit++
+    }
+    return if (value >= 100) "%.0f %s".format(value, units[unit])
+    else "%.1f %s".format(value, units[unit])
+}
+
 /** "COSTCO WHOLESALE" → "Costco Wholesale" — iOS renders merchant/item names capitalized. */
 fun titleCase(text: String): String =
     text.split(" ").joinToString(" ") { word ->
