@@ -121,6 +121,12 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
   (`HOST_PATH`, Apple `/usr/bin/clang`) or it fails with `library 'clang_rt.osx' not found`.
   Android target builds keep the NDK on `PATH`. If a stale build cached the bad
   `ort-sys` host output, bust just it: `cargo clean -p ort-sys`.
+- **Never pin the daemon JVM to a *vendor*.** `gradle/gradle-daemon-jvm.properties`
+  keeps `toolchainVersion=21` and nothing else. `./gradlew updateDaemonJvm` writes
+  `toolchainVendor=jetbrains` too, which makes the build impossible anywhere Android
+  Studio isn't installed: JBR ships only inside JetBrains IDEs, so Gradle tries to
+  download one and dies with `No defined toolchain download url for LINUX on x86_64
+  architecture`. Locally any JDK 21 resolves to the Studio JBR anyway.
 - **16 KB page-size alignment (now done — required, not optional).** Since Nov 2025 Play
   rejects new apps/updates targeting Android 15+ whose `.so`s aren't 16 KB-aligned. Fixed
   here via JNA ≥5.17, the `max-page-size=16384` link arg in `build-android.sh`,
