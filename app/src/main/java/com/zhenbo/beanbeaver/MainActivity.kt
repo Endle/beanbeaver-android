@@ -33,6 +33,9 @@ class MainActivity : ComponentActivity() {
         (application as? BatchLaunchHolder)?.batchExtras = intent.extras
         val runBatch = intent?.getBooleanExtra(BatchRunner.EXTRA_AUTO_RUN_BATCH, false) == true
 
+        // No-op unless the launch asked for it (`--ez logLaunchTiming true`).
+        LaunchTiming.recordFirstFrame(this)
+
         enableEdgeToEdge()
         setContent {
             BeanBeaverTheme {

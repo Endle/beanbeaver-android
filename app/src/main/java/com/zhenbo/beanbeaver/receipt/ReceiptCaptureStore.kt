@@ -23,4 +23,33 @@ object ReceiptCaptureStore {
     /** A fresh, collision-free capture file (its bytes not yet written). */
     fun newCaptureFile(context: Context): File =
         File(directory(context), "receipt_capture_${UUID.randomUUID()}.jpg")
+
+    /** How much disk every kept receipt photo is using, for the Settings row. */
+    fun totalBytes(context: Context): Long =
+        directory(context).listFiles()?.sumOf { it.length() } ?: 0L
+
+    /** What a purge removed, so the caller can say so concretely. */
+    data class ClearResult(val count: Int, val bytes: Long)
+
+    /**
+     * Delete every capture except the ones named in [keeping]. Android twin of
+     * iOS `ReceiptCaptureStore.clearOld(keeping:)`.
+     *
+     * The exemptions matter: the photo behind a result screen the user is still
+     * looking at must not vanish from under them, and neither must one the
+     * pending import batch still needs to parse or export.
+     */
+    fun clearOld(context: Context, keeping: Set<String>): ClearResult {
+        var count = 0
+        var bytes = 0L
+        directory(context).listFiles()?.forEach { file ->
+            if (file.name in keeping) return@forEach
+            val size = file.length()
+            if (file.delete()) {
+                count++
+                bytes += size
+            }
+        }
+        return ClearResult(count, bytes)
+    }
 }

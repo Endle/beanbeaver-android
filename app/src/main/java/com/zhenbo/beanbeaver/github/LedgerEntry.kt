@@ -1,5 +1,7 @@
 package com.zhenbo.beanbeaver.github
 
+import android.content.Context
+import com.zhenbo.beanbeaver.export.LedgerFileOptions
 import com.zhenbo.beanbeaver.receipt.ms
 import com.zhenbo.beanbeaver.receipt.totalMs
 import org.json.JSONArray
@@ -29,18 +31,40 @@ data class LedgerEntry(
          * Build the entry the export destination receives from a finished scan.
          * [imageBytes] is the captured JPEG (in memory); [wallMs] is the observed
          * total scan time, folded into the sidecar's timings.
+         *
+         * The `.json` sidecar is attached only when the user has the "Save details
+         * file" option on ([LedgerFileOptions.includeDetailsJson]) — destinations
+         * skip a null `jsonBytes`.
          */
-        fun make(result: ReceiptResult, imageBytes: ByteArray?, wallMs: Double?): LedgerEntry {
+        fun make(
+            context: Context,
+            result: ReceiptResult,
+            imageBytes: ByteArray?,
+            wallMs: Double?,
+        ): LedgerEntry {
             val document = if (result.documentRelpath != null && imageBytes != null) imageBytes else null
+            val json = if (LedgerFileOptions.includeDetailsJson(context)) {
+                detailsJson(result, wallMs).toByteArray()
+            } else {
+                null
+            }
             return LedgerEntry(
                 beancount = result.beancount,
                 documentBytes = document,
                 documentRelpath = result.documentRelpath,
-                jsonBytes = buildJson(result, wallMs).toString(2).toByteArray(),
+                jsonBytes = json,
                 merchantSlug = merchantSlug(result.merchant),
                 beanbeaverId = result.beanbeaverId,
             )
         }
+
+        /**
+         * The sidecar's contents as pretty text, regardless of whether the user
+         * has "Save details file" on — the preview screen shows the raw parse so
+         * it can be checked *before* deciding to export it.
+         */
+        fun detailsJson(result: ReceiptResult, wallMs: Double?): String =
+            buildJson(result, wallMs).toString(2)
 
         /**
          * The `.json` sidecar: the structured parse before beancount formatting,

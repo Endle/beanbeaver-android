@@ -71,6 +71,21 @@ val syncOcrModels by tasks.registering(Copy::class) {
     }
 }
 
+/**
+ * Ship the legal documents inside the app so they read with no network — which
+ * matters for an app whose whole pitch is that it works offline. Copied from the
+ * repo root rather than duplicated under assets/, so the file a reader sees in
+ * the repo and the file the app displays can't drift (the Android analog of the
+ * iOS target referencing `../PRIVACY.md` directly).
+ */
+val syncLegalDocs by tasks.registering(Copy::class) {
+    description = "Copy PRIVACY.md and THIRD_PARTY_NOTICES.md into app assets"
+    from(rootProject.projectDir) {
+        include("PRIVACY.md", "THIRD_PARTY_NOTICES.md")
+    }
+    into(layout.projectDirectory.dir("src/main/assets/legal"))
+}
+
 android {
     namespace = "com.zhenbo.beanbeaver"
     compileSdk = 36
@@ -149,7 +164,7 @@ android {
     }
 }
 
-tasks.named("preBuild").configure { dependsOn(syncOcrModels) }
+tasks.named("preBuild").configure { dependsOn(syncOcrModels, syncLegalDocs) }
 
 dependencies {
     implementation(project(":bbreceiptkit"))
@@ -168,10 +183,19 @@ dependencies {
     // Photo picker (Android 13+ system picker; backport via activity)
     implementation("androidx.activity:activity-ktx:1.9.3")
 
+    // FileProvider, for handing the generated Money Manager .xlsx to a share
+    // target as a content:// URI rather than a file:// path.
+    implementation("androidx.core:core-ktx:1.15.0")
+
     // On-device document scanner (guided capture + edge-detect/deskew), the
     // Android analog of iOS VisionKit. Delivered via Play services; the capture
     // UI runs in a Play-services activity, so no CAMERA permission is needed here.
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Plain JVM unit tests (./gradlew :app:testDebugUnitTest) — no emulator, no
+    // native library. Everything under src/test covers logic that is deliberately
+    // Context-free for exactly this reason.
+    testImplementation("junit:junit:4.13.2")
 }

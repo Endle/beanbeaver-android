@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Everything shared out of the app comes from cache/exports (the Money Manager
+     .xlsx). Scoped to that one subdirectory rather than the whole cache so a
+     share grant can never reach captured receipt photos. -->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

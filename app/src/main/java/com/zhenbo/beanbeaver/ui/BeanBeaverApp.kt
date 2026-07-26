@@ -1,7 +1,9 @@
 package com.zhenbo.beanbeaver.ui
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -28,18 +30,23 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -69,8 +76,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zhenbo.beanbeaver.Entitlements
+import com.zhenbo.beanbeaver.debug.DebugInfoStore
+import com.zhenbo.beanbeaver.export.MoneyManagerExport
+import com.zhenbo.beanbeaver.export.ShareFile
 import com.zhenbo.beanbeaver.github.GitHubSyncViewModel
 import com.zhenbo.beanbeaver.github.LedgerEntry
+import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
 import com.zhenbo.beanbeaver.receipt.ReceiptPipeline
 import com.zhenbo.beanbeaver.receipt.ScanStatus
@@ -107,14 +119,29 @@ fun BeanBeaverApp(
 
     // Full-screen review of the original photo, opened from the result screen.
     var showOriginalReceipt by rememberSaveable { mutableStateOf(false) }
+    // Read-only view of the .json sidecar an export would attach.
+    var showJsonPreview by rememberSaveable { mutableStateOf(false) }
     // The Android twin of iOS Settings (sync, ledger prefs, scanning, debug, about).
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showGitHubSettings by rememberSaveable { mutableStateOf(false) }
     var showDebug by rememberSaveable { mutableStateOf(false) }
+    var showDataDump by rememberSaveable { mutableStateOf(false) }
+    var showPrivacy by rememberSaveable { mutableStateOf(false) }
+    var showAcknowledgements by rememberSaveable { mutableStateOf(false) }
     // The photo-library batch workspace (multi-receipt import), a peer of the
     // single-scan flow rather than a step within it.
     var showBatch by rememberSaveable { mutableStateOf(false) }
     val image = capturedImage
+
+    // What "Clear Old Receipts" must spare: the photo behind the result screen the
+    // user is currently looking at, so it can't vanish out from under them, and
+    // every photo the pending import batch still needs.
+    val capturedFile by pipeline.capturedFile.collectAsStateWithLifecycle()
+    val batchDrafts by batch.drafts.collectAsStateWithLifecycle()
+    val keptCaptureFilenames = buildSet {
+        capturedFile?.let { add(it.name) }
+        batchDrafts.forEach { add(it.captureFilename) }
+    }
 
     // Sub-screens as boolean-gated early returns (a small nav "stack"): GitHub and
     // Debug sit above Settings, so backing out of them returns to Settings.
@@ -126,9 +153,31 @@ fun BeanBeaverApp(
         DebugInfoScreen(onBack = { showDebug = false })
         return
     }
+    if (showDataDump) {
+        DataDumpScreen(onBack = { showDataDump = false })
+        return
+    }
+    if (showPrivacy) {
+        PrivacyPolicyScreen(onBack = { showPrivacy = false })
+        return
+    }
+    if (showAcknowledgements) {
+        AcknowledgementsScreen(onBack = { showAcknowledgements = false })
+        return
+    }
     if (showOriginalReceipt && image != null) {
         OriginReceiptScreen(imageData = image, onBack = { showOriginalReceipt = false })
         return
+    }
+    (status as? ScanStatus.Done)?.let { done ->
+        if (showJsonPreview) {
+            ReceiptJsonScreen(
+                result = done.result,
+                wallMs = done.wallMs,
+                onBack = { showJsonPreview = false },
+            )
+            return
+        }
     }
     if (showBatch) {
         BatchImportScreen(
@@ -154,14 +203,23 @@ fun BeanBeaverApp(
             },
             githubConnected = ghConnected,
             githubAccount = ghAccount,
+            keptCaptureFilenames = keptCaptureFilenames,
             onOpenGitHub = { showGitHubSettings = true },
             onOpenDebug = { showDebug = true },
+            onOpenDataDump = { showDataDump = true },
+            onOpenPrivacy = { showPrivacy = true },
+            onOpenAcknowledgements = { showAcknowledgements = true },
             onBack = { showSettings = false },
         )
         return
     }
 
-    val startScan = rememberDocumentScanLauncher(onImage = { pipeline.scan(it) })
+    // Only the camera path offers to keep a copy: a photo-library import is
+    // already in the library, so saving it back would just duplicate it.
+    val startScan = rememberDocumentScanLauncher(onImage = { bytes ->
+        if (PhotoSaver.isEnabled(context)) PhotoSaver.save(context, bytes)
+        pipeline.scan(bytes)
+    })
 
     val isDone = status is ScanStatus.Done
 
@@ -178,10 +236,17 @@ fun BeanBeaverApp(
                     }
                 },
                 actions = {
-                    if (isDone && capturedImage != null) {
-                        IconButton(onClick = { showOriginalReceipt = true }) {
-                            Icon(Icons.Default.Photo, contentDescription = "Show original receipt")
-                        }
+                    val done = status as? ScanStatus.Done
+                    if (done != null) {
+                        ResultOverflowMenu(
+                            hasImage = capturedImage != null,
+                            isPremium = Entitlements.isPremium(context),
+                            onShowOriginal = { showOriginalReceipt = true },
+                            onViewJson = { showJsonPreview = true },
+                            onExportMoneyManager = {
+                                shareMoneyManager(context, listOf(done.result))
+                            },
+                        )
                     }
                 },
             )
@@ -218,7 +283,8 @@ fun BeanBeaverApp(
                     exportMessage = exportMessage,
                     onExport = {
                         if (ghConfigured) {
-                            githubVm.export(LedgerEntry.make(s.result, capturedImage, s.wallMs))
+                            githubVm.export(
+                                LedgerEntry.make(context, s.result, capturedImage, s.wallMs))
                         } else {
                             showGitHubSettings = true
                         }
@@ -250,6 +316,66 @@ fun BeanBeaverApp(
             } else null,
         )
     }
+}
+
+/**
+ * The result screen's overflow menu — the original photo, the raw parse, and the
+ * downstream exports that aren't the primary "Export to GitHub" button. Android
+ * twin of the iOS result toolbar's `ellipsis.circle` menu.
+ */
+@Composable
+private fun ResultOverflowMenu(
+    hasImage: Boolean,
+    isPremium: Boolean,
+    onShowOriginal: () -> Unit,
+    onViewJson: () -> Unit,
+    onExportMoneyManager: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    IconButton(onClick = { expanded = true }) {
+        Icon(Icons.Default.MoreVert, contentDescription = "More actions")
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text("Show Original Receipt") },
+            enabled = hasImage,
+            leadingIcon = { Icon(Icons.Default.Photo, contentDescription = null) },
+            onClick = { expanded = false; onShowOriginal() },
+        )
+        DropdownMenuItem(
+            text = { Text("View Details JSON") },
+            leadingIcon = { Icon(Icons.Default.DataObject, contentDescription = null) },
+            onClick = { expanded = false; onViewJson() },
+        )
+        if (isPremium) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Export to Money Manager") },
+                leadingIcon = { Icon(Icons.Default.TableChart, contentDescription = null) },
+                onClick = { expanded = false; onExportMoneyManager() },
+            )
+        }
+    }
+}
+
+/**
+ * Build the Money Manager `.xlsx` and hand it straight to the share sheet. A
+ * failure here is reported in place rather than through the GitHub export's
+ * result dialog — this path never touches the network.
+ */
+private fun shareMoneyManager(context: Context, results: List<ReceiptResult>) {
+    runCatching { MoneyManagerExport.makeFile(context, results) }
+        .onSuccess { file ->
+            ShareFile.share(
+                context, file, ShareFile.XLSX_MIME, "Export to Money Manager")
+        }
+        .onFailure {
+            DebugInfoStore.recordExportFailure(
+                context, "export to Money Manager", it.message ?: it.toString())
+            Toast.makeText(
+                context, "Couldn't build the spreadsheet.", Toast.LENGTH_LONG).show()
+        }
 }
 
 // MARK: - Home

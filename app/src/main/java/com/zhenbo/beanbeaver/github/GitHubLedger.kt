@@ -3,6 +3,7 @@ package com.zhenbo.beanbeaver.github
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -18,8 +19,8 @@ import java.util.Locale
  * twin of iOS `GitHubLedger` — pure GitHub REST over HTTPS, no on-device git:
  *
  *   1. resolve the repo's default branch and read its head commit,
- *   2. create a fresh branch off it,
- *   3. PUT each of the receipt's files onto that branch (one commit each),
+ *   2. upload every file as a blob and hang them off one tree and one commit,
+ *   3. point a fresh branch at that commit,
  *   4. open a PR from that branch into the default branch.
  *
  * Idempotent: every path is content-addressed (the sha8 token), so a file that's
@@ -32,8 +33,8 @@ object GitHubLedger {
 
     data class Config(val owner: String, val repo: String, val token: String)
 
-    /** One file destined for the repo, with the commit message that carries it. */
-    private data class RepoFile(val path: String, val data: ByteArray, val message: String)
+    /** One file destined for the repo. */
+    private data class RepoFile(val path: String, val data: ByteArray)
 
     /** One receipt resolved to where it lands in the repo. */
     private class Filing(val entry: LedgerEntry) {
@@ -58,15 +59,10 @@ object GitHubLedger {
         val files: List<RepoFile>
             get() {
                 val out = mutableListOf(
-                    RepoFile("$folder/$basename.beancount", entry.beancount.toByteArray(),
-                        "BeanBeaver: add receipt transaction"),
+                    RepoFile("$folder/$basename.beancount", entry.beancount.toByteArray()),
                 )
-                entry.jsonBytes?.let {
-                    out.add(RepoFile("$folder/$basename.json", it, "BeanBeaver: add receipt JSON"))
-                }
-                entry.documentBytes?.let {
-                    out.add(RepoFile("$folder/$basename.jpg", it, "BeanBeaver: add receipt image"))
-                }
+                entry.jsonBytes?.let { out.add(RepoFile("$folder/$basename.json", it)) }
+                entry.documentBytes?.let { out.add(RepoFile("$folder/$basename.jpg", it)) }
                 return out
             }
     }
@@ -111,20 +107,57 @@ object GitHubLedger {
                     "All ${filings.size} receipts are already filed in the repo — nothing to open a pull request for.")
         }
 
-        // 3. New branch off the base head.
+        // 3. Upload every file as a blob, then hang them all off one tree and one
+        //    commit. The contents API (one PUT per file) was simpler but commits
+        //    per file, so a receipt landed as three commits — transaction, JSON,
+        //    image — and a batch as three per receipt. A PR is a review unit, and
+        //    the reviewable change is the receipt, not the file.
+        //
+        //    Blobs are content-addressed and belong to no branch, so nothing is
+        //    visible in the repo until the ref is created in step 4. That is why
+        //    the branch is created last: a failure part-way through leaves
+        //    unreferenced blobs for GitHub to garbage-collect rather than a
+        //    half-populated branch.
+        val flattened = pending.flatten()
+        val treeEntries = JSONArray()
+        flattened.forEachIndexed { position, file ->
+            onProgress(
+                if (flattened.size == 1) "Uploading the receipt…"
+                else "Uploading file ${position + 1} of ${flattened.size}…")
+            val blob = api(cfg, "POST", "$repoRoot/git/blobs",
+                JSONObject()
+                    .put("content", Base64.encodeToString(file.data, Base64.NO_WRAP))
+                    .put("encoding", "base64"))
+            treeEntries.put(
+                JSONObject()
+                    .put("path", file.path)
+                    // 100644 = a non-executable regular file; the only mode we write.
+                    .put("mode", "100644")
+                    .put("type", "blob")
+                    .put("sha", blob.getString("sha")))
+        }
+
+        onProgress("Committing…")
+        // `base_tree` takes a *tree* sha, not a commit sha, so resolve the base
+        // commit's tree first. Without it the new tree would replace the repo
+        // wholesale and every existing file would read as deleted.
+        val baseCommit = api(cfg, "GET", "$repoRoot/git/commits/$baseSha")
+        val tree = api(cfg, "POST", "$repoRoot/git/trees",
+            JSONObject()
+                .put("base_tree", baseCommit.getJSONObject("tree").getString("sha"))
+                .put("tree", treeEntries))
+        val commit = api(cfg, "POST", "$repoRoot/git/commits",
+            JSONObject()
+                .put("message", commitMessage(filings))
+                .put("tree", tree.getString("sha"))
+                .put("parents", JSONArray().put(baseSha)))
+
+        // 4. Point a new branch at that commit — the first moment any of this is
+        //    reachable in the repo.
         onProgress("Creating the branch…")
         val branch = "beanbeaver/receipt-${branchStamp()}"
         api(cfg, "POST", "$repoRoot/git/refs",
-            JSONObject().put("ref", "refs/heads/$branch").put("sha", baseSha))
-
-        // 4. One commit per file — the contents API can't batch files into one
-        //    commit, and each builds on the last, so this is serial by necessity.
-        pending.forEachIndexed { position, group ->
-            onProgress(
-                if (pending.size == 1) "Uploading the receipt…"
-                else "Uploading receipt ${position + 1} of ${pending.size}…")
-            group.forEach { putFile(cfg, repoRoot, it, branch) }
-        }
+            JSONObject().put("ref", "refs/heads/$branch").put("sha", commit.getString("sha")))
 
         // 5. Open the PR.
         onProgress("Opening the pull request…")
@@ -143,6 +176,15 @@ object GitHubLedger {
         return "Add receipt: ${only.entry.merchantSlug} ${only.dateToken}"
     }
 
+    /**
+     * Subject for the single commit the whole batch lands as. Mirrors the PR
+     * title, with the folders in the body so the commit stands on its own once
+     * it's squashed out of the PR context.
+     */
+    private fun commitMessage(filings: List<Filing>): String =
+        "BeanBeaver: ${title(filings).replaceFirstChar { it.lowercase() }}\n\n" +
+            filings.joinToString("\n") { "- ${it.folder}/" }
+
     private fun prBody(filings: List<Filing>): String {
         val only = filings.singleOrNull()
             ?: return "Filed ${filings.size} scanned receipts with BeanBeaver Android.\n\n" +
@@ -158,14 +200,6 @@ object GitHubLedger {
         } catch (e: HttpStatusException) {
             if (e.status == 404) false else throw e
         }
-    }
-
-    private suspend fun putFile(cfg: Config, repoRoot: String, file: RepoFile, branch: String) {
-        api(cfg, "PUT", "$repoRoot/contents/${encodePath(file.path)}",
-            JSONObject()
-                .put("message", file.message)
-                .put("content", Base64.encodeToString(file.data, Base64.NO_WRAP))
-                .put("branch", branch))
     }
 
     private fun encodePath(path: String): String =

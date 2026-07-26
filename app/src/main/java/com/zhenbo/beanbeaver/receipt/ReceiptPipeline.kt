@@ -17,6 +17,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.bb_receipt_ffi.ReceiptResult
+import java.io.File
 import kotlin.coroutines.coroutineContext
 
 sealed interface ScanStatus {
@@ -42,12 +43,24 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
 
     /**
      * The exact JPEG bytes the OCR saw, kept so the result screen can show the
-     * original receipt for review (see [ScanStatus.Done] and the zoomable
-     * viewer). Mirrors iOS `ReceiptPipeline.capturedImageURL`; we hold the bytes
-     * in memory rather than on disk since this MVP scans one receipt at a time.
+     * original receipt for review (see [ScanStatus.Done] and the zoomable viewer).
      */
     private val _capturedImage = MutableStateFlow<ByteArray?>(null)
     val capturedImage: StateFlow<ByteArray?> = _capturedImage.asStateFlow()
+
+    /**
+     * The same capture written into [ReceiptCaptureStore], mirroring iOS
+     * `ReceiptPipeline.capturedImageURL`.
+     *
+     * The bytes above are what the screen draws; this is what makes the photo a
+     * first-class member of the capture store — so Settings can account for its
+     * size and "Clear Old Receipts" can purge it. Without it the single-scan path
+     * would be the one photo the storage screen could neither see nor clear.
+     * Kept (not deleted on [reset]) for the same reason it is on iOS: the photo
+     * is the durable thing a parse can always be re-derived from.
+     */
+    private val _capturedFile = MutableStateFlow<File?>(null)
+    val capturedFile: StateFlow<File?> = _capturedFile.asStateFlow()
 
     var creditCardAccount: String = "Liabilities:CreditCard"
 
@@ -77,6 +90,8 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
         _scanProgress.value = 0.0
         _scanStepLabel.value = StepEstimate.FIRST_LABEL
         _capturedImage.value = null
+        // The file itself stays in the capture store; Settings owns purging it.
+        _capturedFile.value = null
     }
 
     fun scanBundledSample() {
@@ -93,6 +108,12 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _status.value = ScanStatus.Scanning
             _capturedImage.value = imageData
+            _capturedFile.value = withContext(Dispatchers.IO) {
+                runCatching {
+                    ReceiptCaptureStore.newCaptureFile(getApplication())
+                        .apply { writeBytes(imageData) }
+                }.getOrNull()
+            }
             _scanProgress.value = 0.0
             _scanStepLabel.value = StepEstimate.FIRST_LABEL
             progressJob?.cancel()

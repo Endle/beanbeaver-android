@@ -1,5 +1,7 @@
 package com.zhenbo.beanbeaver.ui
 
+import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,6 +68,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.zhenbo.beanbeaver.Entitlements
+import com.zhenbo.beanbeaver.debug.DebugInfoStore
+import com.zhenbo.beanbeaver.export.MoneyManagerExport
+import com.zhenbo.beanbeaver.export.ShareFile
 import com.zhenbo.beanbeaver.github.LedgerEntry
 import com.zhenbo.beanbeaver.receipt.DraftState
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
@@ -181,6 +188,19 @@ fun BatchImportScreen(
                                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                                 onClick = launchPicker,
                             )
+                            val parsed = drafts.mapNotNull { (it.state as? DraftState.Parsed)?.result }
+                            if (Entitlements.isPremium(context) && parsed.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Export to Money Manager") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.TableChart, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        shareMoneyManagerBatch(context, parsed)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Discard Batch") },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
@@ -536,4 +556,22 @@ private fun BatchReceiptDetailScreen(
             }
         }
     }
+}
+
+/**
+ * Build one Money Manager `.xlsx` covering every parsed receipt in the batch and
+ * hand it to the share sheet — the batch analog of the result screen's export.
+ * Unlike the GitHub path this never touches the network, so it reports failure
+ * in place rather than through the export result dialog.
+ */
+private fun shareMoneyManagerBatch(context: Context, results: List<ReceiptResult>) {
+    runCatching { MoneyManagerExport.makeFile(context, results) }
+        .onSuccess { file ->
+            ShareFile.share(context, file, ShareFile.XLSX_MIME, "Export to Money Manager")
+        }
+        .onFailure {
+            DebugInfoStore.recordExportFailure(
+                context, "export batch to Money Manager", it.message ?: it.toString())
+            Toast.makeText(context, "Couldn't build the spreadsheet.", Toast.LENGTH_LONG).show()
+        }
 }
