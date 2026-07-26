@@ -26,8 +26,10 @@ until that comes back.
 | `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Bins `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness). Pins the `bb-receipt-ffi` tag. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
-| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `launch-timing.sh` (cold-launch latency on a real device). |
+| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device). |
 | `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting. |
+| `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
+| `.github/workflows/` | `android-build.yml` — the CI below. |
 
 **Generated / git-ignored** (rebuilt by `build-android.sh` / Gradle): `bbreceiptkit/src/main/kotlin/uniffi/`, `bbreceiptkit/src/main/jniLibs/`, `app/src/main/assets/models/`, `app/src/main/assets/legal/`, `target/`, `local.properties`.
 
@@ -83,6 +85,34 @@ cp keystore.properties.example keystore.properties   # then fill in real values
   form, content rating, target-audience + financial-app declarations, and store-listing
   assets (512² icon, 1024×500 feature graphic, ≥2 screenshots).
 
+### CI (`.github/workflows/android-build.yml`)
+
+One `ubuntu-latest` job, the Android twin of iOS's `ios-build.yml`: NDK
+cross-build of `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug
+./build-android.sh`) → `:app:assembleDebug` (APK uploaded as an artifact) →
+`:app:testDebugUnitTest` → `:app:lintDebug` → **host E2E**: `batch_e2e` scans
+the bundled fixture and `compare-e2e.py` grades merchant/date/total/items
+against `tests/receipts_e2e/`. Cargo, the `ort` prebuilt, the ONNX weights and
+Gradle are all cached; a warm run is a few minutes.
+
+**There is no emulator job, and adding one is not a matter of writing YAML.**
+The app is arm64-v8a only, and no GitHub-hosted runner can run an arm64 AVD:
+the x86_64 Linux runners are the only ones with KVM but can't install an
+arm64-only APK; the Apple-Silicon macOS runners have no HVF, because Apple's
+Virtualization Framework doesn't nest (an arm64 AVD dies `HV_UNSUPPORTED` /
+SIGSEGV); Linux arm64 runners have no KVM either. So the **JNI seam is the one
+thing CI cannot prove** — the host E2E covers the same core, models, fixture and
+grader, but not `.so` loading, the UniFFI checksum or JNA. Prove that on real
+arm64 hardware: locally with
+
+```bash
+./scripts/android-e2e.sh "$(./scripts/e2e-fixtures.sh)" --pilot
+```
+
+and, if it ever needs to be automatic, via a self-hosted arm64 Mac runner or a
+device farm (Firebase Test Lab — which would want an instrumented `androidTest`
+wrapper around `BatchRunner`; there is no `androidTest` source set today).
+
 ### Gotchas (already cost time — don't relearn)
 
 - **`build-android.sh` host-PATH split (keep it).** The script prepends the NDK's
@@ -91,6 +121,12 @@ cp keystore.properties.example keystore.properties   # then fill in real values
   (`HOST_PATH`, Apple `/usr/bin/clang`) or it fails with `library 'clang_rt.osx' not found`.
   Android target builds keep the NDK on `PATH`. If a stale build cached the bad
   `ort-sys` host output, bust just it: `cargo clean -p ort-sys`.
+- **Never pin the daemon JVM to a *vendor*.** `gradle/gradle-daemon-jvm.properties`
+  keeps `toolchainVersion=21` and nothing else. `./gradlew updateDaemonJvm` writes
+  `toolchainVendor=jetbrains` too, which makes the build impossible anywhere Android
+  Studio isn't installed: JBR ships only inside JetBrains IDEs, so Gradle tries to
+  download one and dies with `No defined toolchain download url for LINUX on x86_64
+  architecture`. Locally any JDK 21 resolves to the Studio JBR anyway.
 - **16 KB page-size alignment (now done — required, not optional).** Since Nov 2025 Play
   rejects new apps/updates targeting Android 15+ whose `.so`s aren't 16 KB-aligned. Fixed
   here via JNA ≥5.17, the `max-page-size=16384` link arg in `build-android.sh`,
@@ -105,7 +141,9 @@ cp keystore.properties.example keystore.properties   # then fill in real values
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
   change means adapting `ReceiptScanner.kt` (as v0.5.0's `currency` +
-  `tax_account` did).
+  `tax_account` did) **and `src/bin/batch_e2e.rs`** — nothing built that bin, so
+  it silently rotted against the v0.6.x `scan()` arity and `ScanTimings.spans`
+  until CI started compiling it.
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
   is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.
