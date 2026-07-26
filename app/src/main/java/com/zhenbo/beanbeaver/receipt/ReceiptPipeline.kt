@@ -66,9 +66,10 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
 
     /**
      * Whether to skip the textline-orientation classifier (~22% of scan time on
-     * this device). Backed by SharedPreferences and read by [session]; toggling
-     * it forces the next scan to reload the OCR session with/without the cls
-     * model. Fine for upright receipts; hurts 180°-rotated lines.
+     * this device). On by default (see [OcrSessionProvider.skipOrientation]).
+     * Backed by SharedPreferences and read by [session]; toggling it forces the
+     * next scan to reload the OCR session with/without the cls model. Fine for
+     * upright receipts; hurts 180°-rotated lines.
      */
     private val _skipOrientation = MutableStateFlow(OcrSessionProvider.skipOrientation(app))
     val skipOrientation: StateFlow<Boolean> = _skipOrientation.asStateFlow()
