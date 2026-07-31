@@ -92,6 +92,10 @@ android {
     // Pin build-tools for reproducible builds; install this version via the
     // Android Studio SDK Manager (or `sdkmanager "build-tools;36.0.0"`).
     buildToolsVersion = "36.0.0"
+    // Must be pinned, and must match what build-android.sh compiled with — see
+    // bb.ndkVersion in gradle.properties for why (AGP silently stops stripping
+    // and stops producing Play symbols when it can't resolve an NDK).
+    ndkVersion = providers.gradleProperty("bb.ndkVersion").get()
 
     defaultConfig {
         applicationId = "com.zhenbo.beanbeaver"
@@ -108,8 +112,15 @@ android {
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")
 
         // MVP ships arm64-v8a only (ort has no x86_64-linux-android prebuild).
+        //
         // debugSymbolLevel FULL uploads native (ORT/Rust) symbols to Play so
         // native crashes in the on-device scan are symbolicated in the console.
+        // FULL rather than SYMBOL_TABLE despite the release .so having no
+        // .debug_* sections (cargo release is debug = false): FULL runs
+        // --only-keep-debug, which emits a .dbg of essentially the symbol table
+        // and gives function-name symbolication. SYMBOL_TABLE would run
+        // --strip-debug, which on a file with no debug sections copies the whole
+        // 37 MB instead. Requires ndkVersion above to resolve, or it does nothing.
         ndk {
             abiFilters += listOf("arm64-v8a")
             debugSymbolLevel = "FULL"

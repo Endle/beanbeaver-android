@@ -7,6 +7,12 @@ android {
     namespace = "com.beanbeaver.bbreceiptkit"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
+    // Pinned here too, not just in :app. This module's own strip task doesn't
+    // feed the app (AGP publishes MERGED_NATIVE_LIBS to downstream consumers on
+    // purpose, so :app can extract symbols), but leaving it unpinned emits
+    // "Unable to strip the following libraries" noise — and an unpinned module
+    // is exactly how the two drift apart.
+    ndkVersion = providers.gradleProperty("bb.ndkVersion").get()
 
     defaultConfig {
         minSdk = 34
