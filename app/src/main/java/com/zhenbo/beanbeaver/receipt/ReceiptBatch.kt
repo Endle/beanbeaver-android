@@ -117,6 +117,7 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
     /** Drop a draft, photo and all — nothing else refers to the photo, and it's the user's storage. */
     fun remove(id: String) {
         val draft = _drafts.value.firstOrNull { it.id == id } ?: return
+        forgetRecord(draft)
         deleteCapture(draft)
         mutate { list -> list.removeAll { it.id == id } }
     }
@@ -124,8 +125,19 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
     /** Throw the whole batch away. Cancels any scan in flight — no point finishing one for a draft that's going. */
     fun discardAll() {
         stopParsing()
+        _drafts.value.forEach(::forgetRecord)
         _drafts.value.forEach(::deleteCapture)
         mutate { it.clear() }
+    }
+
+    /**
+     * Drop the [SpendStore] row a parsed draft created. Discarding a draft is an
+     * explicit "I don't want this receipt", so it must not quietly stay in the
+     * spend figures. Only for discards — [removeParsed] (what a successful export
+     * calls) deliberately leaves the record behind.
+     */
+    private fun forgetRecord(draft: ReceiptDraft) {
+        SpendStore.removeRecords(getApplication(), setOf(draft.captureFilename))
     }
 
     /**
@@ -200,6 +212,11 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
                     val wallMs = (System.nanoTime() - started) / 1_000_000.0
                     setState(draft.id, DraftState.Parsed(result, wallMs))
                     DebugInfoStore.recordSuccess(app, result, wallMs)
+                    // Same hook as the single-scan path. Without it, bulk export
+                    // from this page would drain the batch while keeping no record
+                    // of what it exported — which is exactly the bug the iOS side
+                    // found when it built this.
+                    SpendStore.record(app, result, draft.captureFilename, wallMs)
                 } catch (t: Throwable) {
                     Log.e(TAG, "batch scan failed", t)
                     setState(draft.id, DraftState.Failed(t.message ?: t.toString()))

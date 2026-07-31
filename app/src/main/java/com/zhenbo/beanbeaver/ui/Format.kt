@@ -18,11 +18,28 @@ data class PriceDisplay(val text: String, val isNegative: Boolean)
  * an already-clean "$2.49") — normalize to a consistent "$X.XX". iOS `PriceFormat`.
  */
 fun formatPrice(raw: String): PriceDisplay {
-    val filtered = raw.filter { it.isDigit() || it == '.' || it == '-' }
-    val value = filtered.toDoubleOrNull() ?: return PriceDisplay(raw, isNegative = false)
+    val value = priceValue(raw) ?: return PriceDisplay(raw, isNegative = false)
     val sign = if (value < 0) "-" else ""
     val text = "$sign$" + "%.2f".format(kotlin.math.abs(value))
     return PriceDisplay(text, isNegative = value < 0)
+}
+
+/**
+ * The numeric value behind an OCR'd price string, or null when it can't be read.
+ * iOS `PriceFormat.value`.
+ *
+ * The one place a price becomes a number, so display and arithmetic can't
+ * disagree about what "17.1900" is worth. A null is meaningful rather than
+ * zero — [com.zhenbo.beanbeaver.receipt.SpendSummary] counts unreadable prices
+ * instead of silently treating them as free.
+ */
+fun priceValue(raw: String?): Double? =
+    raw?.filter { it.isDigit() || it == '.' || it == '-' }?.toDoubleOrNull()
+
+/** A computed amount as the app writes money ("$8.42", "-$3.50"). iOS `PriceFormat.currency`. */
+fun formatCurrency(value: Double): String {
+    val sign = if (value < 0) "-" else ""
+    return "$sign$" + "%.2f".format(kotlin.math.abs(value))
 }
 
 /** ISO `YYYY-MM-DD` → the way a person writes a date ("Mar 1, 2026"). iOS `ReceiptDateFormat`. */

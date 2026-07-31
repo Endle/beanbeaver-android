@@ -75,6 +75,7 @@ import com.zhenbo.beanbeaver.export.ShareFile
 import com.zhenbo.beanbeaver.github.LedgerEntry
 import com.zhenbo.beanbeaver.receipt.DraftState
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
+import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.receipt.ReceiptCaptureStore
 import com.zhenbo.beanbeaver.receipt.ReceiptDraft
 import com.zhenbo.beanbeaver.receipt.needsAttention
@@ -568,6 +569,7 @@ private fun shareMoneyManagerBatch(context: Context, results: List<ReceiptResult
     runCatching { MoneyManagerExport.makeFile(context, results) }
         .onSuccess { file ->
             ShareFile.share(context, file, ShareFile.XLSX_MIME, "Export to Money Manager")
+            SpendStore.markShared(context, results)
         }
         .onFailure {
             DebugInfoStore.recordExportFailure(

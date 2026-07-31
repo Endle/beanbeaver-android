@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -41,6 +42,8 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +62,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +80,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.zhenbo.beanbeaver.Entitlements
 import com.zhenbo.beanbeaver.debug.DebugInfoStore
 import com.zhenbo.beanbeaver.export.MoneyManagerExport
@@ -86,6 +92,9 @@ import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
 import com.zhenbo.beanbeaver.receipt.ReceiptPipeline
 import com.zhenbo.beanbeaver.receipt.ScanStatus
+import com.zhenbo.beanbeaver.receipt.SpendRecord
+import com.zhenbo.beanbeaver.receipt.SpendStore
+import com.zhenbo.beanbeaver.receipt.SpendSummary
 import com.zhenbo.beanbeaver.receipt.label
 import com.zhenbo.beanbeaver.receipt.totalMs
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
@@ -133,17 +142,37 @@ fun BeanBeaverApp(
     // The photo-library batch workspace (multi-receipt import), a peer of the
     // single-scan flow rather than a step within it.
     var showBatch by rememberSaveable { mutableStateOf(false) }
+    // The spend drill-down, deepest state last: Spending -> a category's items ->
+    // one receipt. `receiptsMonthFilter` is a nullable-in-a-box because null is a
+    // meaningful value here ("all months"), distinct from "not showing Receipts".
+    var showSpending by rememberSaveable { mutableStateOf(false) }
+    var showReceipts by rememberSaveable { mutableStateOf(false) }
+    var receiptsMonthFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var openCategory by remember { mutableStateOf<Triple<SpendSummary.Category, String, String>?>(null) }
+    var openRecordId by rememberSaveable { mutableStateOf<String?>(null) }
     val image = capturedImage
 
-    // What "Clear Old Receipts" must spare: the photo behind the result screen the
-    // user is currently looking at, so it can't vanish out from under them, and
-    // every photo the pending import batch still needs.
-    val capturedFile by pipeline.capturedFile.collectAsStateWithLifecycle()
-    val batchDrafts by batch.drafts.collectAsStateWithLifecycle()
-    val keptCaptureFilenames = buildSet {
-        capturedFile?.let { add(it.name) }
-        batchDrafts.forEach { add(it.captureFilename) }
+    // Both stores are read by the home card on first frame, so they load with the
+    // app rather than when a screen that needs them opens.
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            SpendStore.ensureLoaded(context)
+            AmountPrivacy.ensureLoaded(context)
+        }
     }
+    val spendRecords by SpendStore.records.collectAsStateWithLifecycle()
+
+    // Registered before the sub-screen early returns below, not after: an
+    // activity-result launcher has to be created on every composition, and the
+    // Spending screen's empty state calls it.
+    //
+    // Only the camera path offers to keep a copy: a photo-library import is
+    // already in the library, so saving it back would just duplicate it.
+    val startScan = rememberDocumentScanLauncher(onImage = { bytes ->
+        if (PhotoSaver.isEnabled(context)) PhotoSaver.save(context, bytes)
+        pipeline.scan(bytes)
+    })
+
 
     // Sub-screens as boolean-gated early returns (a small nav "stack"): GitHub and
     // Debug sit above Settings, so backing out of them returns to Settings.
@@ -185,6 +214,64 @@ fun BeanBeaverApp(
             return
         }
     }
+    // Deepest first, so backing out unwinds one rung at a time: receipt ->
+    // category items -> Receipts/Spending.
+    openRecordId?.let { id ->
+        val record = spendRecords.firstOrNull { it.id == id }
+        if (record != null) {
+            RecordedReceiptScreen(record = record, onBack = { openRecordId = null })
+            return
+        }
+        // The record was deleted from under this screen (its own Delete, or a
+        // bulk delete); fall through to whatever is beneath rather than blanking.
+        openRecordId = null
+    }
+    openCategory?.let { (category, title, monthId) ->
+        CategoryItemsScreen(
+            category = category,
+            title = title,
+            monthId = monthId,
+            onOpenReceipt = { openRecordId = it.id },
+            onBack = { openCategory = null },
+        )
+        return
+    }
+    if (showReceipts) {
+        ReceiptsScreen(
+            monthFilter = receiptsMonthFilter,
+            onOpenReceipt = { openRecordId = it.id },
+            exportReady = ghConfigured,
+            onExport = { selected ->
+                if (!ghConfigured) {
+                    showGitHubSettings = true
+                } else {
+                    githubVm.export(
+                        selected.map { record ->
+                            LedgerEntry.make(
+                                context,
+                                record.result,
+                                SpendStore.photoFile(context, record)?.readBytes(),
+                                record.wallMs,
+                            )
+                        },
+                    )
+                }
+            },
+            onBack = { showReceipts = false },
+        )
+        return
+    }
+    if (showSpending) {
+        SpendingScreen(
+            onScan = { showSpending = false; startScan() },
+            onOpenReceipts = { month -> receiptsMonthFilter = month; showReceipts = true },
+            onOpenCategory = { category, title, monthId ->
+                openCategory = Triple(category, title, monthId)
+            },
+            onBack = { showSpending = false },
+        )
+        return
+    }
     if (showBatch) {
         BatchImportScreen(
             batch = batch,
@@ -209,7 +296,6 @@ fun BeanBeaverApp(
             },
             githubConnected = ghConnected,
             githubAccount = ghAccount,
-            keptCaptureFilenames = keptCaptureFilenames,
             onOpenGitHub = { showGitHubSettings = true },
             onOpenItemRules = { showItemRules = true },
             onOpenDebug = { showDebug = true },
@@ -220,13 +306,6 @@ fun BeanBeaverApp(
         )
         return
     }
-
-    // Only the camera path offers to keep a copy: a photo-library import is
-    // already in the library, so saving it back would just duplicate it.
-    val startScan = rememberDocumentScanLauncher(onImage = { bytes ->
-        if (PhotoSaver.isEnabled(context)) PhotoSaver.save(context, bytes)
-        pipeline.scan(bytes)
-    })
 
     val isDone = status is ScanStatus.Done
 
@@ -274,6 +353,8 @@ fun BeanBeaverApp(
                     exportReady = ghConfigured,
                     onExport = { showGitHubSettings = true },
                     onSettings = { showSettings = true },
+                    onOpenSpending = { showSpending = true },
+                    onOpenReceipts = { receiptsMonthFilter = null; showReceipts = true },
                 )
                 is ScanStatus.Scanning -> ScanningPane(
                     progress = progress.toFloat(),
@@ -376,6 +457,10 @@ private fun shareMoneyManager(context: Context, results: List<ReceiptResult>) {
         .onSuccess { file ->
             ShareFile.share(
                 context, file, ShareFile.XLSX_MIME, "Export to Money Manager")
+            // Marked at presentation, not confirmed delivery — the share sheet
+            // that follows may be cancelled — which is why the row says "Shared",
+            // never "Filed".
+            SpendStore.markShared(context, results)
         }
         .onFailure {
             DebugInfoStore.recordExportFailure(
@@ -387,6 +472,58 @@ private fun shareMoneyManager(context: Context, results: List<ReceiptResult>) {
 
 // MARK: - Home
 
+/**
+ * The current month's tracked spend, right on the home screen — the one number
+ * the app exists to produce, and the way through to the spending screen. A button
+ * labelled "Spending" would hide it behind a tap for no gain.
+ *
+ * Hidden until something has been scanned: a card reading $0.00 is worse than no
+ * card, and a new user's first move is the scanner below anyway. Which month it
+ * shows comes from [SpendSummary.defaultMonthId] — the same rule the spending
+ * screen opens on, so the card can't advertise one month and hand you another.
+ */
+@Composable
+private fun SpendCard(records: List<SpendRecord>, onClick: () -> Unit) {
+    if (records.isEmpty()) return
+    val hidden by AmountPrivacy.hideAmounts.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val month = remember(records) {
+        SpendSummary.month(SpendSummary.defaultMonthId(records), records)
+    }
+
+    BbCard(modifier = Modifier.clickable(onClick = onClick)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                month.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            // The eye here writes the same single stored value as the one on the
+            // Spending toolbar and the Settings toggle, so the three can't disagree.
+            IconButton(onClick = { AmountPrivacy.toggle(context) }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    if (hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (hidden) "Show amounts" else "Hide amounts",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        Text(
+            maskedAmount(formatCurrency(month.tracked), hidden),
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+        )
+        Text(
+            "tracked spend · ${month.receiptCount} receipt${if (month.receiptCount == 1) "" else "s"}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun HomePane(
     onScan: () -> Unit,
@@ -394,7 +531,11 @@ private fun HomePane(
     exportReady: Boolean,
     onExport: () -> Unit,
     onSettings: () -> Unit,
+    onOpenSpending: () -> Unit,
+    onOpenReceipts: () -> Unit,
 ) {
+    val records by SpendStore.records.collectAsStateWithLifecycle()
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -409,6 +550,8 @@ private fun HomePane(
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 24.dp),
         )
+
+        SpendCard(records = records, onClick = onOpenSpending)
 
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -429,6 +572,17 @@ private fun HomePane(
                 Icon(Icons.Default.PhotoLibrary, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Import from Photos", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = onOpenReceipts,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.History, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Receipts" + if (records.isEmpty()) "" else " (${records.size})",
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
             OutlinedButton(
                 onClick = onExport,

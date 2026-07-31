@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -42,15 +43,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zhenbo.beanbeaver.BuildConfig
 import com.zhenbo.beanbeaver.Entitlements
 import com.zhenbo.beanbeaver.debug.DebugInfoStore
 import com.zhenbo.beanbeaver.export.LedgerFileOptions
 import com.zhenbo.beanbeaver.export.MoneyManagerExport
+import com.zhenbo.beanbeaver.receipt.BudgetPrefs
 import com.zhenbo.beanbeaver.receipt.LedgerFormatPrefs
 import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.ReceiptCaptureStore
+import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
 
 /**
@@ -67,7 +72,6 @@ fun SettingsScreen(
     onRunSample: () -> Unit,
     githubConnected: Boolean,
     githubAccount: String?,
-    keptCaptureFilenames: Set<String>,
     onOpenGitHub: () -> Unit,
     onOpenItemRules: () -> Unit,
     onOpenDebug: () -> Unit,
@@ -85,8 +89,18 @@ fun SettingsScreen(
     var saveToPhotos by remember { mutableStateOf(PhotoSaver.isEnabled(context)) }
     var premiumEnabled by remember { mutableStateOf(Entitlements.isPremium(context)) }
     var moneyManagerAccount by remember { mutableStateOf(MoneyManagerExport.account(context)) }
-    var capturedBytes by remember { mutableStateOf(ReceiptCaptureStore.totalBytes(context)) }
-    var clearResultMessage by remember { mutableStateOf<String?>(null) }
+
+    val spendRecords by SpendStore.records.collectAsStateWithLifecycle()
+    val hideAmounts by AmountPrivacy.hideAmounts.collectAsStateWithLifecycle()
+    // Recomputed as records change, so clearing photos updates the row in place.
+    val capturedBytes = remember(spendRecords) { ReceiptCaptureStore.totalBytes(context) }
+    val budgetRoots = remember { BudgetPrefs.declaredRoots(context) }
+    var budgetRoot by remember { mutableStateOf(BudgetPrefs.root(context)) }
+    var budgetAmount by remember {
+        mutableStateOf(BudgetPrefs.monthlyAmount(context)?.let { "%.2f".format(it) } ?: "")
+    }
+    var confirmClearAllPhotos by remember { mutableStateOf(false) }
+    var confirmDeleteAllReceipts by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = groupedBackground,
@@ -215,28 +229,87 @@ fun SettingsScreen(
             }
 
             SettingsSection(
-                footer = "Each scan keeps a copy of the receipt photo on your device so you can review " +
-                    "the original later. This removes all of them except the one you're currently " +
-                    "viewing and any still waiting in a photo import.",
+                title = "Budget",
+                footer = "Which tracked category gets a monthly target on the Spending screen — " +
+                    "computed from your scanned receipts' items, not the receipt totals. Leave the " +
+                    "amount blank to track spend with no target.",
             ) {
-                LabeledRow("Captured receipt photos", formatBytes(capturedBytes))
+                PresetOrCustomField(
+                    label = "Budget category",
+                    // Never a hardcoded list: the picker offers exactly the roots
+                    // the rule corpus in force declares, so an imported document
+                    // that adds a category can be budgeted the same day.
+                    presets = budgetRoots.map { it.replaceFirstChar { c -> c.uppercase() } to it },
+                    value = budgetRoot,
+                ) {
+                    budgetRoot = it
+                    BudgetPrefs.setRoot(context, it)
+                }
+                Spacer(Modifier.size(12.dp))
+                OutlinedTextField(
+                    value = budgetAmount,
+                    onValueChange = {
+                        budgetAmount = it
+                        BudgetPrefs.setMonthlyAmount(context, it.toDoubleOrNull())
+                    },
+                    label = { Text("Monthly amount") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            SettingsSection(
+                footer = "Money figures on the home card and the Spending screens read as \"$•••\" " +
+                    "until you tap the eye. On by default — anyone glancing at an unlocked phone " +
+                    "would otherwise read your month's total off the home screen.",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Hide amounts",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = hideAmounts,
+                        onCheckedChange = { AmountPrivacy.set(context, it) },
+                    )
+                }
+            }
+
+            // The honest successor to the old "Clear Old Receipts": no heuristic,
+            // and each action says exactly what it keeps. A scanned receipt is now
+            // kept until the user removes it (see SpendStore), so this is the only
+            // place that storage is freed from.
+            SettingsSection(
+                title = "Receipts",
+                footer = "Every receipt you scan is kept on this device until you remove it. " +
+                    "Clearing photos frees the space but keeps every parsed receipt and every " +
+                    "spend figure; deleting removes both. Anything already exported to your " +
+                    "ledger is untouched either way.",
+            ) {
+                LabeledRow("Receipts recorded", "${spendRecords.size}")
+                Spacer(Modifier.size(8.dp))
+                LabeledRow("Receipt photos", formatBytes(capturedBytes))
                 Spacer(Modifier.size(8.dp))
                 OutlinedButton(
-                    onClick = {
-                        val result = ReceiptCaptureStore.clearOld(context, keptCaptureFilenames)
-                        capturedBytes = ReceiptCaptureStore.totalBytes(context)
-                        clearResultMessage = if (result.count > 0) {
-                            "Cleared ${result.count} receipt photo${if (result.count == 1) "" else "s"}, " +
-                                "freed ${formatBytes(result.bytes)}."
-                        } else {
-                            "No old receipt photos to clear."
-                        }
-                    },
+                    onClick = { confirmClearAllPhotos = true },
+                    enabled = spendRecords.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Clear Old Receipts", fontWeight = FontWeight.SemiBold)
+                    Text("Clear All Photos", fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.size(8.dp))
+                OutlinedButton(
+                    onClick = { confirmDeleteAllReceipts = true },
+                    enabled = spendRecords.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.DeleteOutline, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Delete All Receipts", fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -327,13 +400,48 @@ fun SettingsScreen(
         }
     }
 
-    clearResultMessage?.let { message ->
+
+    if (confirmClearAllPhotos) {
         AlertDialog(
-            onDismissRequest = { clearResultMessage = null },
-            title = { Text("Storage") },
-            text = { Text(message) },
+            onDismissRequest = { confirmClearAllPhotos = false },
+            title = { Text("Clear all photos?") },
+            text = {
+                Text(
+                    "Frees the space used by every receipt photo. Every receipt's parsed data " +
+                        "and every spend figure stay exactly as they are.",
+                )
+            },
             confirmButton = {
-                TextButton(onClick = { clearResultMessage = null }) { Text("OK") }
+                TextButton(onClick = {
+                    SpendStore.clearAllPhotos(context)
+                    confirmClearAllPhotos = false
+                }) { Text("Clear Photos") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearAllPhotos = false }) { Text("Cancel") }
+            },
+        )
+    }
+    if (confirmDeleteAllReceipts) {
+        val n = spendRecords.size
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAllReceipts = false },
+            title = { Text("Delete all receipts?") },
+            text = {
+                Text(
+                    "Removes the parsed data and the photos for every scanned receipt on this " +
+                        "device. Anything already exported to your ledger is untouched, and " +
+                        "originals stay in your photo library.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    SpendStore.removeAll(context)
+                    confirmDeleteAllReceipts = false
+                }) { Text("Delete $n Receipt${if (n == 1) "" else "s"}") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteAllReceipts = false }) { Text("Cancel") }
             },
         )
     }

@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zhenbo.beanbeaver.debug.DebugInfoStore
+import com.zhenbo.beanbeaver.receipt.SpendStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -244,6 +245,14 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
                     _exportMessage.value = message
                 }
                 _exportResult.value = ExportResult("Pull request opened", url, url, isError = false)
+                // The one hook every ledger-export call site routes through, so
+                // the Receipts row can say "Filed to GitHub" without each caller
+                // remembering to mark it.
+                SpendStore.markExported(
+                    getApplication(),
+                    entries.mapNotNull { it.beanbeaverId },
+                    target = "GitHub",
+                )
                 ok = true
             } catch (e: Exception) {
                 val message = e.message ?: "Export failed."
