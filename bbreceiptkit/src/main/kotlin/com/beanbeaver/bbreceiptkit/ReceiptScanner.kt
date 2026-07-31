@@ -2,6 +2,7 @@ package com.beanbeaver.bbreceiptkit
 
 import uniffi.bb_receipt_ffi.DateYmd
 import uniffi.bb_receipt_ffi.OcrSession
+import uniffi.bb_receipt_ffi.ParseOptions
 import uniffi.bb_receipt_ffi.ReceiptResult
 import java.io.File
 import java.time.LocalDate
@@ -41,6 +42,11 @@ object ReceiptScanner {
         creditCardAccount: String,
         currency: String = "CAD",
         taxAccount: String = "Expenses:Tax:HST",
+        /**
+         * Rule overlays. Defaults to the bundled corpus, so existing callers are
+         * unaffected; the app passes the user's imported documents here.
+         */
+        options: ParseOptions = ParseOptions(emptyList(), emptyList()),
     ): ReceiptResult {
         val today = LocalDate.now()
         val date = DateYmd(
@@ -48,6 +54,8 @@ object ReceiptScanner {
             month = today.monthValue.toUInt(),
             day = today.dayOfMonth.toUInt(),
         )
-        return session.scan(imageData, date, creditCardAccount, currency, taxAccount)
+        return session.scanWithOptions(
+            imageData, date, creditCardAccount, currency, taxAccount, options,
+        )
     }
 }

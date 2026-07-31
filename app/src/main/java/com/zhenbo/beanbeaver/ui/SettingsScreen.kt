@@ -69,6 +69,7 @@ fun SettingsScreen(
     githubAccount: String?,
     keptCaptureFilenames: Set<String>,
     onOpenGitHub: () -> Unit,
+    onOpenItemRules: () -> Unit,
     onOpenDebug: () -> Unit,
     onOpenDataDump: () -> Unit,
     onOpenPrivacy: () -> Unit,
@@ -184,6 +185,14 @@ fun SettingsScreen(
                     taxAccount = it
                     LedgerFormatPrefs.setTaxAccount(context, it)
                 }
+            }
+
+            SettingsSection(
+                footer = "The ruleset that decides an item's tags and account. Browse what's built " +
+                    "in, test a receipt line to see which rules fired, or import your own rules to " +
+                    "layer on top.",
+            ) {
+                NavRow(title = "Categories & Tags", subtitle = null, onClick = onOpenItemRules)
             }
 
             if (premiumEnabled) {

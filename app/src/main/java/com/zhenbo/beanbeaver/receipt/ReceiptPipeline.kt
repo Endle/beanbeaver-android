@@ -128,7 +128,13 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
             try {
                 val result = withContext(Dispatchers.Default) {
                     val session = OcrSessionProvider.loaded(app)
-                    ReceiptScanner.scan(session, imageData, account, currency, taxAccount)
+                    // Read per scan, not snapshotted at construction, so a rule
+                    // document imported a moment ago applies to this scan. Off
+                    // the main thread: the first read compiles the whole corpus.
+                    val ruleOptions = ItemRuleStore.parseOptions(app)
+                    ReceiptScanner.scan(
+                        session, imageData, account, currency, taxAccount, ruleOptions,
+                    )
                 }
                 val wallMs = (System.nanoTime() - started) / 1_000_000.0
                 progressJob?.cancel()

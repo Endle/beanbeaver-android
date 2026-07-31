@@ -189,7 +189,13 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
                 try {
                     val result = withContext(Dispatchers.Default) {
                         val session = OcrSessionProvider.loaded(app)
-                        ReceiptScanner.scan(session, bytes, account, currency, taxAccount)
+                        // Re-read per draft rather than once per loop, so an import
+                        // during a long batch takes effect on the next receipt
+                        // rather than the next batch.
+                        val ruleOptions = ItemRuleStore.parseOptions(app)
+                        ReceiptScanner.scan(
+                            session, bytes, account, currency, taxAccount, ruleOptions,
+                        )
                     }
                     val wallMs = (System.nanoTime() - started) / 1_000_000.0
                     setState(draft.id, DraftState.Parsed(result, wallMs))
