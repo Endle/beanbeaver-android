@@ -1,5 +1,7 @@
 package com.zhenbo.beanbeaver.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -157,26 +159,6 @@ fun SettingsScreen(
             }
 
             SettingsSection(
-                footer = "Store a .json alongside each exported receipt — its items, prices, and category " +
-                    "tags — next to the beancount and photo. Applies to every export destination.",
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Save details file",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = includeDetailsJson,
-                        onCheckedChange = {
-                            includeDetailsJson = it
-                            LedgerFileOptions.setIncludeDetailsJson(context, it)
-                        },
-                    )
-                }
-            }
-
-            SettingsSection(
                 title = "Ledger",
                 footer = "The currency and tax account used in every beancount entry BeanBeaver generates. " +
                     "Currency defaults to your region. Takes effect on the next scan.",
@@ -198,6 +180,31 @@ fun SettingsScreen(
                 ) {
                     taxAccount = it
                     LedgerFormatPrefs.setTaxAccount(context, it)
+                }
+            }
+
+            // Sits under Ledger rather than at the top of the page: it's the same
+            // kind of setting — what an export writes — and it's a narrow one, so
+            // it shouldn't be the first thing Settings opens on. Still its own
+            // section, not folded into Ledger, because it spans every file
+            // backend rather than the beancount format.
+            SettingsSection(
+                footer = "Store a .json alongside each exported receipt — its items, prices, and category " +
+                    "tags — next to the beancount and photo. Applies to every export destination.",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Save details file",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = includeDetailsJson,
+                        onCheckedChange = {
+                            includeDetailsJson = it
+                            LedgerFileOptions.setIncludeDetailsJson(context, it)
+                        },
+                    )
                 }
             }
 
@@ -397,6 +404,32 @@ fun SettingsScreen(
                 LabeledRow("BeanBeaver", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 LabeledRow("beanbeaver-core", BuildConfig.CORE_VERSION)
             }
+
+            // Directly under About, so the two read as one move: the versions to
+            // quote, then somewhere to quote them.
+            SettingsSection(
+                title = "Feedback",
+                footer = "Questions, bugs, and receipts that came out wrong — whichever room suits " +
+                    "you. When it's a scan problem, include the two versions above.",
+            ) {
+                FEEDBACK_ROOMS.forEachIndexed { i, room ->
+                    if (i > 0) Spacer(Modifier.size(8.dp))
+                    NavRow(
+                        title = room.first,
+                        subtitle = null,
+                        // ACTION_VIEW hands the URL to the system, which is what
+                        // lets an installed Discord or Element app take it and
+                        // the browser handle it otherwise. Wrapped because a
+                        // device with nothing able to open it would otherwise
+                        // throw ActivityNotFoundException.
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(room.second)))
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 
@@ -453,6 +486,12 @@ private fun currencyPresets(): List<Pair<String, String>> {
     LedgerFormatPrefs.localeCurrency()?.let { if (it !in codes) codes.add(0, it) }
     return codes.map { it to it }
 }
+
+/** Where the project can be reached: display title to URL. */
+private val FEEDBACK_ROOMS = listOf(
+    "Discord" to "https://discord.gg/qsfS7uUMHQ",
+    "Matrix" to "https://matrix.to/#/#beanbeaver:matrix.org",
+)
 
 private val TAX_PRESETS = listOf(
     "HST (Canada)" to "Expenses:Tax:HST",
