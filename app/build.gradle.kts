@@ -143,7 +143,15 @@ android {
             if (hasUploadKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = false
+            // 43 MB of unminified dex was most of what this app ships that isn't
+            // the ONNX models or the native library, and it is dominated by
+            // material-icons-extended and play-services — of which the app uses a
+            // sliver. R8 is also what produces the mapping file Play asks for: in
+            // an .aab it is embedded automatically at
+            // BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map,
+            // so there is nothing to upload by hand.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
