@@ -2,6 +2,7 @@ package com.zhenbo.beanbeaver.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,6 +64,7 @@ import com.zhenbo.beanbeaver.ui.theme.groupedBackground
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GitHubSettingsScreen(vm: GitHubSyncViewModel, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val openUrl: (String) -> Unit = { url ->
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }

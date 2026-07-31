@@ -3,6 +3,7 @@ package com.zhenbo.beanbeaver.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,7 @@ import com.zhenbo.beanbeaver.ui.theme.groupedBackground
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DataDumpScreen(onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val dump = remember { DataDump.capture(context) }
 
