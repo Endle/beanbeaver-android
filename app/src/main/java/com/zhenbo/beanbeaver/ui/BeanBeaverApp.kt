@@ -124,6 +124,8 @@ fun BeanBeaverApp(
     // The Android twin of iOS Settings (sync, ledger prefs, scanning, debug, about).
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showGitHubSettings by rememberSaveable { mutableStateOf(false) }
+    // Browse/import the classification ruleset.
+    var showItemRules by rememberSaveable { mutableStateOf(false) }
     var showDebug by rememberSaveable { mutableStateOf(false) }
     var showDataDump by rememberSaveable { mutableStateOf(false) }
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
@@ -147,6 +149,10 @@ fun BeanBeaverApp(
     // Debug sit above Settings, so backing out of them returns to Settings.
     if (showGitHubSettings) {
         GitHubSettingsScreen(vm = githubVm, onBack = { showGitHubSettings = false })
+        return
+    }
+    if (showItemRules) {
+        ItemRulesScreen(onBack = { showItemRules = false })
         return
     }
     if (showDebug) {
@@ -205,6 +211,7 @@ fun BeanBeaverApp(
             githubAccount = ghAccount,
             keptCaptureFilenames = keptCaptureFilenames,
             onOpenGitHub = { showGitHubSettings = true },
+            onOpenItemRules = { showItemRules = true },
             onOpenDebug = { showDebug = true },
             onOpenDataDump = { showDataDump = true },
             onOpenPrivacy = { showPrivacy = true },
