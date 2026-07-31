@@ -12,10 +12,13 @@ core-tag pinning rules (this repo is newer and not listed there yet — treat it
 
 **Scope:** document camera (ML Kit) or system photo picker or bundled sample →
 scan → merchant / items / Beancount → export (GitHub PR, or a Money Manager
-`.xlsx` via the share sheet), single or batch. Not yet: a Storage Access
-Framework ledger destination — iOS's equivalent Files-inbox backend is written
-but commented out ("disabled for now"), so this side deliberately has no twin
-until that comes back.
+`.xlsx` via the share sheet), single or batch. Every scan is also **recorded**,
+so the app is a spend tracker over its own history: Spending (per-month category
+breakdown, drilling into the items behind any total) and Receipts (everything
+scanned, kept until deleted). Settings can browse and extend the classification
+ruleset. Not yet: a Storage Access Framework ledger destination — iOS's
+equivalent Files-inbox backend is written but commented out ("disabled for now"),
+so this side deliberately has no twin until that comes back.
 
 ## Layout
 
@@ -27,7 +30,7 @@ until that comes back.
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
 | `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device). |
-| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting. |
+| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
 | `.github/workflows/` | `android-build.yml` — the CI below. |
 
@@ -155,3 +158,18 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
   is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.
+- **`SpendSummary.kt` must stay free of Android imports** — no `Context`, no
+  preferences, no Compose. That is what lets its arithmetic be pinned by JVM
+  tests rather than eyeballed on a screen, and it keeps the one genuinely
+  shareable part of spend tracking liftable if ios/android ever share logic.
+  `BudgetPrefs` and `AmountPrivacy` hold the platform-bound halves; a target is
+  an overlay drawn on top of the arithmetic and must never be an input to it.
+- **Process-wide stores, not ViewModels**, for `SpendStore`, `ItemRuleStore` and
+  `AmountPrivacy`: both scan paths write to them and several screens read them,
+  and a stale copy in one owner is exactly the bug to avoid. Each is `ensureLoaded`
+  + `StateFlow`, loaded off the main thread (`ItemRuleStore` compiles the whole
+  TOML corpus on first read).
+- Sub-screens are **boolean-gated early returns**, not a Nav back stack, so any
+  new screen needs its own `BackHandler` — without one, system back leaves the
+  app instead of popping. (The older Settings/GitHub/Debug screens predate this
+  and still lack one.)
