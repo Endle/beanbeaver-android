@@ -53,6 +53,12 @@ target_ort_key() {
   esac
 }
 
+# The pinned NDK, read from the one place that declares it. AGP strips the .so
+# and extracts Play debug symbols with this same NDK, so the compiler and the
+# objcopy must not be different revisions.
+NDK_VERSION="$(awk -F= '/^bb\.ndkVersion=/{gsub(/[[:space:]]/,"",$2); print $2}' \
+  "$ANDROID_ROOT/gradle.properties" 2>/dev/null || true)"
+
 find_ndk() {
   if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "$ANDROID_NDK_HOME" ]; then
     echo "$ANDROID_NDK_HOME"; return
@@ -61,6 +67,10 @@ find_ndk() {
     echo "$ANDROID_NDK_ROOT"; return
   fi
   local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+  # Prefer the pin over "newest installed", so auto-discovery agrees with Gradle.
+  if [ -n "${NDK_VERSION:-}" ] && [ -d "$sdk/ndk/$NDK_VERSION" ]; then
+    echo "$sdk/ndk/$NDK_VERSION"; return
+  fi
   if [ -d "$sdk/ndk" ]; then
     ls -1d "$sdk/ndk"/* 2>/dev/null | sort -V | tail -1
     return
@@ -72,9 +82,23 @@ NDK="$(find_ndk || true)"
 if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
   cat >&2 <<EOF
 error: Android NDK not found.
-  Install the NDK via Android Studio's SDK Manager, then set ANDROID_NDK_HOME
-  to its root (e.g. \$ANDROID_HOME/ndk/27.0.12077973). build-android.sh also
-  auto-discovers \$ANDROID_HOME/ndk/<latest> when ANDROID_NDK_HOME is unset.
+  Install the pinned NDK via Android Studio's SDK Manager, or:
+    sdkmanager "ndk;${NDK_VERSION:-<version>}"
+  build-android.sh auto-discovers \$ANDROID_HOME/ndk/${NDK_VERSION:-<version>}
+  when ANDROID_NDK_HOME is unset.
+EOF
+  exit 1
+fi
+if [ -n "${NDK_VERSION:-}" ] && [ "$(basename "$NDK")" != "$NDK_VERSION" ]; then
+  cat >&2 <<EOF
+error: NDK version mismatch.
+  using:  $NDK
+  pinned: $NDK_VERSION  (bb.ndkVersion in gradle.properties)
+
+AGP strips the .so and extracts Play debug symbols with the pinned NDK, so the
+library has to be built with that same one. Either install it:
+    sdkmanager "ndk;$NDK_VERSION"
+or unset ANDROID_NDK_HOME so auto-discovery picks the pinned directory.
 EOF
   exit 1
 fi
