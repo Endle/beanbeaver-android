@@ -114,7 +114,7 @@ object BatchRunner {
                                             JSONObject()
                                                 .put("description", item.description)
                                                 .put("price", item.price)
-                                                .put("category", item.category ?: JSONObject.NULL),
+                                                .put("account", item.account ?: JSONObject.NULL),
                                         )
                                     }
                                 },

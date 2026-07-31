@@ -1,5 +1,6 @@
 package com.zhenbo.beanbeaver.ui
 
+import uniffi.bb_receipt_ffi.ItemTag
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -34,19 +35,20 @@ fun friendlyDate(raw: String?): String? {
 
 /**
  * How an item's classifier tags render: the classifier emits tags broad→specific
- * (e.g. `["grocery", "meat", "chicken"]`), so the last is the most specific — we
- * lead with it as an accent chip and keep the rest as quiet context. Empty tags →
- * [primary] is null (the row shows "Uncategorized"). iOS `CategoryDisplay.tagDisplay`.
+ * (e.g. `grocery`, `grocery/meat`, `grocery/meat/chicken`), so the last is the
+ * most specific — we lead with it as an accent chip and keep the rest as quiet
+ * context. Empty tags → [primary] is null (the row shows "Uncategorized").
+ * iOS `CategoryDisplay.tagDisplay`.
  */
 data class TagDisplay(val primary: String?, val rest: List<String>)
 
-fun tagDisplay(tags: List<String>): TagDisplay {
-    val cleaned = tags.filter { it.isNotEmpty() }
+fun tagDisplay(tags: List<ItemTag>): TagDisplay {
+    val cleaned = tags.filter { it.display.isNotEmpty() }
     val last = cleaned.lastOrNull() ?: return TagDisplay(primary = null, rest = emptyList())
-    return TagDisplay(
-        primary = last.replaceFirstChar { it.uppercase() },
-        rest = cleaned.dropLast(1).map { s -> s.replaceFirstChar { it.uppercase() } },
-    )
+    // `display` is authored in the core's tag vocabulary (v0.7.0), so it is used
+    // verbatim. This used to capitalize the raw tag, which put `energy_drink` on
+    // the card as "Energy_drink".
+    return TagDisplay(primary = last.display, rest = cleaned.dropLast(1).map { it.display })
 }
 
 /**

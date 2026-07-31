@@ -3,6 +3,7 @@ package com.zhenbo.beanbeaver.receipt
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.bb_receipt_ffi.FieldConfidences
+import uniffi.bb_receipt_ffi.ItemTag
 import uniffi.bb_receipt_ffi.MerchantMatch
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.Phase
@@ -28,13 +29,17 @@ object ReceiptResultJson {
     fun encode(r: ReceiptResult): JSONObject {
         val items = JSONArray()
         r.items.forEach { item ->
+            val tags = JSONArray()
+            item.tags.forEach { tag ->
+                tags.put(JSONObject().put("path", tag.path).put("display", tag.display))
+            }
             items.put(
                 JSONObject()
                     .put("description", item.description)
                     .put("price", item.price)
                     .put("quantity", item.quantity)
-                    .put("category", item.category ?: JSONObject.NULL)
-                    .put("tags", JSONArray(item.tags)),
+                    .put("account", item.account ?: JSONObject.NULL)
+                    .put("tags", tags),
             )
         }
         val spans = JSONArray()
@@ -78,8 +83,14 @@ object ReceiptResultJson {
                 description = item.getString("description"),
                 price = item.getString("price"),
                 quantity = item.getInt("quantity"),
-                category = item.optNullableString("category"),
-                tags = item.getJSONArray("tags").strings(),
+                // Pre-0.7.0 wrote a `category` holding a *classifier key*
+                // (`grocery_dairy`), not a beancount account, so it is
+                // deliberately NOT read into `account` — copying it across would
+                // fabricate a wrong account. Such a draft decodes with a null
+                // account and relies on its stored `beancount` text, which is
+                // authoritative.
+                account = item.optNullableString("account"),
+                tags = item.decodeTags(),
             )
         }
 
@@ -124,6 +135,28 @@ object ReceiptResultJson {
 // value is present and a plain `getString` is safe.
 private fun JSONObject.optNullableString(key: String): String? =
     if (isNull(key)) null else getString(key)
+
+/**
+ * An item's tags, reading **both** on-disk shapes.
+ *
+ * A batch saved by an older build is still in the captures directory when the
+ * app updates, so a pre-0.7.0 draft has to keep loading or the user loses an
+ * in-progress import. Old tags were bare strings; only the last was ever shown,
+ * so a capitalized fallback label renders a legacy draft exactly as it looked
+ * before the upgrade.
+ */
+private fun JSONObject.decodeTags(): List<ItemTag> =
+    (0 until getJSONArray("tags").length()).map { i ->
+        when (val raw = getJSONArray("tags").get(i)) {
+            is JSONObject -> ItemTag(
+                path = raw.getString("path"),
+                display = raw.optString("display", raw.getString("path")),
+            )
+            else -> raw.toString().let { path ->
+                ItemTag(path = path, display = path.replaceFirstChar { it.uppercase() })
+            }
+        }
+    }
 
 private fun JSONArray.strings(): List<String> =
     (0 until length()).map { getString(it) }
