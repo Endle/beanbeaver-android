@@ -79,8 +79,13 @@ data class LedgerEntry(
                         .put("description", item.description)
                         .put("price", item.price)
                         .put("quantity", item.quantity)
-                        .put("category", item.category ?: JSONObject.NULL)
-                        .put("tags", JSONArray(item.tags)),
+                        // The resolved beancount account, and the tag paths
+                        // least-specific first (`["grocery", "grocery/dairy"]`).
+                        // Paths rather than labels: the sidecar keeps the full
+                        // classification even if the tag → account mapping or
+                        // the authored wording later changes.
+                        .put("account", item.account ?: JSONObject.NULL)
+                        .put("tags", JSONArray(item.tags.map { it.path })),
                 )
             }
             val t = result.timings

@@ -136,7 +136,7 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.6.4**. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.7.1**. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -144,6 +144,14 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
   `tax_account` did) **and `src/bin/batch_e2e.rs`** — nothing built that bin, so
   it silently rotted against the v0.6.x `scan()` arity and `ScanTimings.spans`
   until CI started compiling it.
+- **A field rename reaches further than its call sites.** v0.7.0's
+  `ReceiptItem.category -> account` and `tags: [String] -> [ItemTag]` also moved
+  three JSON writers (`LedgerEntry` sidecar, `DebugInfoStore`, `BatchRunner`),
+  the batch's own persistence, `batch_e2e`'s output shape and the
+  `compare-e2e.py` that grades it. `ReceiptResultJson.decode` reads **both**
+  tag shapes on purpose: a batch saved by the previous build is still on disk
+  when the app updates. Pre-0.7.0 `category` is deliberately *not* read into
+  `account` — it held a classifier key (`grocery_dairy`), not an account.
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
   is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.

@@ -3,6 +3,7 @@ package com.zhenbo.beanbeaver.ui
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import uniffi.bb_receipt_ffi.ItemTag
 
 /**
  * The display helpers are the iOS twins in `Theme.swift` — the two apps are
@@ -26,15 +27,37 @@ class FormatTest {
 
     @Test
     fun `tags lead with the most specific`() {
-        val display = tagDisplay(listOf("grocery", "meat", "chicken"))
+        val display = tagDisplay(
+            listOf(
+                ItemTag("grocery", "Grocery"),
+                ItemTag("grocery/meat", "Meat"),
+                ItemTag("grocery/meat/chicken", "Chicken"),
+            ),
+        )
         assertEquals("Chicken", display.primary)
         assertEquals(listOf("Grocery", "Meat"), display.rest)
+    }
+
+    /**
+     * The whole point of core v0.7.0's authored `display`: the label is taken
+     * verbatim rather than capitalized from the path, which used to render
+     * `energy_drink` as "Energy_drink".
+     */
+    @Test
+    fun `labels come from the vocabulary, not from the path`() {
+        val display = tagDisplay(
+            listOf(
+                ItemTag("grocery", "Grocery"),
+                ItemTag("grocery/energy_drink", "Energy Drink"),
+            ),
+        )
+        assertEquals("Energy Drink", display.primary)
     }
 
     @Test
     fun `empty tags have no primary`() {
         assertNull(tagDisplay(emptyList()).primary)
-        assertNull(tagDisplay(listOf("")).primary)
+        assertNull(tagDisplay(listOf(ItemTag("grocery", ""))).primary)
     }
 
     @Test

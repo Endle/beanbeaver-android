@@ -86,8 +86,8 @@ object DebugInfoStore {
                     .put("description", it.description)
                     .put("price", it.price)
                     .put("quantity", it.quantity)
-                    .put("category", it.category ?: JSONObject.NULL)
-                    .put("tags", JSONArray(it.tags)),
+                    .put("account", it.account ?: JSONObject.NULL)
+                    .put("tags", JSONArray(it.tags.map { tag -> tag.path })),
             )
         }
         val warnings = JSONArray()
