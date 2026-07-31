@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,6 +41,7 @@ import uniffi.bb_receipt_ffi.ReceiptResult
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiptJsonScreen(result: ReceiptResult, wallMs: Double?, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val json = remember(result) { LedgerEntry.detailsJson(result, wallMs) }
 

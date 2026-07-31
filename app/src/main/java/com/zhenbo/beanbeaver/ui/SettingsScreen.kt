@@ -2,6 +2,7 @@ package com.zhenbo.beanbeaver.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,6 +84,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+
+    BackHandler(onBack = onBack)
 
     var currency by remember { mutableStateOf(LedgerFormatPrefs.currency(context)) }
     var taxAccount by remember { mutableStateOf(LedgerFormatPrefs.taxAccount(context)) }

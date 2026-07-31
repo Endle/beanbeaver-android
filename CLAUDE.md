@@ -171,5 +171,7 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
   TOML corpus on first read).
 - Sub-screens are **boolean-gated early returns**, not a Nav back stack, so any
   new screen needs its own `BackHandler` — without one, system back leaves the
-  app instead of popping. (The older Settings/GitHub/Debug screens predate this
-  and still lack one.)
+  app entirely instead of popping one rung. Every screen carries one now; a
+  shared scaffold (`DocumentScaffold`, `DetailScaffold`) carries a single one on
+  behalf of all its callers. Adding a screen without one is the easiest way to
+  regress this, and it will not show up in a build or a unit test.

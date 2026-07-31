@@ -1,5 +1,6 @@
 package com.zhenbo.beanbeaver.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebugInfoScreen(onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     var entries by remember { mutableStateOf(DebugInfoStore.entries(context)) }
     var viewing by remember { mutableStateOf<DebugInfoStore.StoredEntry?>(null) }
@@ -132,6 +134,9 @@ private fun DebugEntryRow(entry: DebugInfoStore.StoredEntry, onClick: () -> Unit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DebugEntryDetail(entry: DebugInfoStore.StoredEntry, onBack: () -> Unit) {
+    // Nested one level under the list, so back has to pop to it rather than
+    // skip straight out of the app.
+    BackHandler(onBack = onBack)
     val text = remember(entry) { runCatching { entry.file.readText() }.getOrDefault("(unreadable)") }
     Scaffold(
         containerColor = groupedBackground,

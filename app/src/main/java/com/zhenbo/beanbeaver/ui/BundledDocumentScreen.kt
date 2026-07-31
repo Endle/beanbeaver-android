@@ -1,6 +1,7 @@
 package com.zhenbo.beanbeaver.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -99,6 +100,9 @@ private fun DocumentScaffold(
     onBack: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    // Covers both PrivacyPolicyScreen and AcknowledgementsScreen, which share
+    // this scaffold.
+    BackHandler(onBack = onBack)
     Scaffold(
         containerColor = groupedBackground,
         topBar = {
