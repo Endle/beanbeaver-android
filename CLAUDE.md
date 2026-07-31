@@ -52,7 +52,10 @@ The shell has none of these exported by default. Set them per-invocation:
 
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk"
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/<version>"   # build-android.sh's fallback path is wrong
+# Optional — build-android.sh auto-discovers the pinned NDK. Set it only to
+# override, and it must match bb.ndkVersion in gradle.properties or the script
+# refuses to run (AGP strips with that same NDK; see Gotchas).
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.15729638"
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"  # for ./gradlew
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
 
@@ -80,6 +83,12 @@ cp keystore.properties.example keystore.properties   # then fill in real values
   Without it the release variant builds **unsigned**. Enroll in **Play App Signing** so
   the upload key is resettable.
 - Every upload needs a unique, higher `versionCode` (`app/build.gradle.kts`).
+- **Two gates run automatically; neither has an escape hatch, by design.**
+  `:bbreceiptkit:verifyReleaseNativeProfile` refuses to start a release build whose
+  `jniLibs/` came from `PROFILE=debug`, and `:app:verifyReleaseBundle` finalizes
+  `bundleRelease` and refuses to leave behind an `.aab` that would earn a Play warning
+  (size, missing native symbols, missing mapping). Each failure message names the
+  console text it prevents. A healthy bundle is **~38 MB**.
 - 16 KB page-size support is **mandatory** for Android 15+ targets: `useLegacyPackaging =
   false`, `extractNativeLibs="false"`, JNA ≥5.17, and the `max-page-size=16384` link arg
   in `build-android.sh` — all already wired. Verify with
@@ -90,13 +99,23 @@ cp keystore.properties.example keystore.properties   # then fill in real values
 
 ### CI (`.github/workflows/android-build.yml`)
 
-One `ubuntu-latest` job, the Android twin of iOS's `ios-build.yml`: NDK
-cross-build of `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug
-./build-android.sh`) → `:app:assembleDebug` (APK uploaded as an artifact) →
-`:app:testDebugUnitTest` → `:app:lintDebug` → **host E2E**: `batch_e2e` scans
-the bundled fixture and `compare-e2e.py` grades merchant/date/total/items
-against `tests/receipts_e2e/`. Cargo, the `ort` prebuilt, the ONNX weights and
-Gradle are all cached; a warm run is a few minutes.
+Two `ubuntu-latest` jobs.
+
+**`build`** — the Android twin of iOS's `ios-build.yml`: NDK cross-build of
+`bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug ./build-android.sh`) →
+`:app:assembleDebug` (APK uploaded as an artifact) → `:app:testDebugUnitTest` →
+`:app:lintDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
+`compare-e2e.py` grades merchant/date/total/items against `tests/receipts_e2e/`.
+Cargo, the `ort` prebuilt, the ONNX weights and Gradle are all cached; a warm run
+is a few minutes.
+
+**`release-bundle`** — the path that actually ships, which nothing exercised
+until v0.4.0 reached Play carrying a debug native library. Release-profile
+`./build-android.sh` (deliberately: the gates refuse a debug library, and this
+job exists to test what gets uploaded) → `:app:bundleRelease`, which runs R8, the
+strip/symbol extraction, and both gates as a finalizer. Unsigned — signing has no
+bearing on what the gates read. **This is the only CI coverage R8 has**, since
+`:app:assembleDebug` never runs it.
 
 **There is no emulator job, and adding one is not a matter of writing YAML.**
 The app is arm64-v8a only, and no GitHub-hosted runner can run an arm64 AVD:
@@ -118,6 +137,36 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
 ### Gotchas (already cost time — don't relearn)
 
+- **`ndkVersion` must be pinned, or AGP silently stops stripping *and* stops producing
+  Play symbols.** With no `ndkVersion`, AGP 8.13.2 looks for its own built-in default
+  (`27.0.12077973`), doesn't find it, and degrades `stripReleaseDebugSymbols` into a
+  **file copy** — with only a warning. And because `ExtractNativeDebugMetadataTask`
+  skips any library whose stripped output is the same length as its input, that also
+  disables the Play symbols upload, so `debugSymbolLevel = "FULL"` produces *nothing*.
+  Two symptoms, one cause. `bb.ndkVersion` in `gradle.properties` is the single source
+  of truth: both modules read it, `build-android.sh` prefers it and hard-fails on a
+  mismatch, and CI installs it. **Never let the NDK that compiles the `.so` differ from
+  the one AGP strips it with.** Symptom if it regresses: the packaged
+  `libbb_receipt_ffi.so` is ~37 MB instead of ~25 MB, `libc++_shared.so` is 9.5 MB
+  instead of 1.4 MB, and `BUNDLE-METADATA/…/debugsymbols/` is absent.
+- **Stripping rewrites the ELF, so re-check 16 KB alignment after any change to it.**
+  `llvm-objcopy --strip-unneeded` rebuilds section headers and file layout. It *does*
+  preserve `p_align` (verified: all four packaged `.so`s report `Align 0x4000`, and
+  `zipalign -c -P 16 -v 4` passes), but alignment is a hard Play requirement, so verify
+  both layers rather than assuming:
+  ```bash
+  unzip -p app-release.apk lib/arm64-v8a/libbb_receipt_ffi.so > /tmp/s.so
+  "$ANDROID_HOME/ndk/<pin>/toolchains/llvm/prebuilt/*/bin/llvm-readelf" -l /tmp/s.so | grep LOAD
+  "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 app-release.apk
+  ```
+- **A debug `.so` will ship if you let it.** `build-android.sh` copies whatever cargo
+  last built into `jniLibs/`, so a `PROFILE=debug` run left behind by emulator testing
+  becomes the library in your next release bundle — 224 MB instead of 37 MB. This
+  actually reached Play as v0.4.0. `verifyReleaseNativeProfile` now refuses it by
+  reading the `PROFILE` that `build-android.sh` records in the generated
+  `BuildInfo.kt`, which is a matched pair with the `.so` beside it. **After any
+  `PROFILE=debug` build, re-run `./build-android.sh` before bundling** — or just let
+  the gate tell you.
 - **`build-android.sh` host-PATH split (keep it).** The script prepends the NDK's
   `llvm/bin` to `PATH`. NDK r27+ ships only a `darwin-x86_64` host toolchain with no
   macOS compiler-rt, so the **host** uniffi-bindgen build must run with a clean `PATH`

@@ -81,13 +81,21 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # gradle.properties is the single source of truth for the NDK revision, and
+      # the runner's own ANDROID_NDK_LATEST_HOME is whatever that image happens
+      # to ship — it drifts out from under you. Read the pin instead.
+      - name: Read the pinned NDK version
+        run: |
+          echo "BB_NDK=$(awk -F= '/^bb\.ndkVersion=/{gsub(/[[:space:]]/,"",$2); print $2}' \
+            gradle.properties)" >> "$GITHUB_ENV"
+
       # compileSdk 36 + buildToolsVersion 36.0.0 are pinned in
-      # app/build.gradle.kts; the runner image doesn't necessarily ship that
-      # exact build-tools revision, and AGP won't fetch it.
+      # app/build.gradle.kts, and the NDK in gradle.properties; the runner image
+      # doesn't necessarily ship those exact revisions, and AGP won't fetch them.
       - name: Install the pinned SDK packages
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-36" "build-tools;36.0.0"
+            "platforms;android-36" "build-tools;36.0.0" "ndk;$BB_NDK"
 
       # Cross-compiles bb-receipt-ffi for aarch64-linux-android and regenerates
       # the UniFFI Kotlin. Both are git-ignored, so nothing in bbreceiptkit/ even
@@ -95,7 +103,7 @@ jobs:
       # tree is green. This is also the step that fails loudly when the pinned
       # core tag moves and ReceiptScanner.kt wasn't adapted.
       - name: Build core (.so + UniFFI Kotlin bindings)
-        run: ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:?}" PROFILE=debug ./build-android.sh
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" PROFILE=debug ./build-android.sh
 
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug
@@ -136,3 +144,86 @@ jobs:
             --models models --in-dir "$FIX" --out "$FIX/batch_out.json"
           python3 scripts/compare-e2e.py \
             --results "$FIX/batch_out.json" --manifest "$FIX/manifest.json"
+
+  # The path that actually ships, which nothing exercised until v0.4.0 reached
+  # Play as an 81.8 MiB bundle carrying a debug native library. The debug job
+  # above deliberately builds PROFILE=debug for speed, so it can prove neither
+  # R8 (which only runs for release) nor the strip/symbol extraction — and both
+  # gates refuse to run against a debug library, correctly.
+  #
+  # What this cannot do is prove the JNI seam under R8: no hosted runner can run
+  # an arm64 AVD (see the header). That still needs real hardware.
+  release-bundle:
+    name: Release bundle (R8 + strip + Play gates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Rust + Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ort.pyke.io
+          key: ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ort-${{ runner.os }}-
+
+      - name: Cache OCR models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ocr-models-${{ hashFiles('scripts/fetch-models.sh') }}
+
+      - name: Fetch OCR models
+        run: ./scripts/fetch-models.sh
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Read the pinned NDK version
+        run: |
+          echo "BB_NDK=$(awk -F= '/^bb\.ndkVersion=/{gsub(/[[:space:]]/,"",$2); print $2}' \
+            gradle.properties)" >> "$GITHUB_ENV"
+
+      # The NDK matters more here than in the debug job: AGP strips the .so and
+      # extracts the Play debug symbols with it, and silently does neither when
+      # it can't resolve one.
+      - name: Install the pinned SDK packages
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;36.0.0" "ndk;$BB_NDK"
+
+      # Release profile on purpose — it is the whole point of this job, and
+      # bbreceiptkit's verifyReleaseNativeProfile would refuse a debug library.
+      - name: Build core (release .so + UniFFI Kotlin bindings)
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" ./build-android.sh
+
+      # Unsigned: keystore.properties isn't in git, and signing has no bearing on
+      # what the gates read (dex, native libs, BUNDLE-METADATA). verifyReleaseBundle
+      # runs automatically as a finalizer.
+      - name: Bundle release
+        run: ./gradlew :app:bundleRelease
+
+      - name: Report what shipped
+        run: |
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          ls -l "$AAB"
+          unzip -l "$AAB" | grep -E "\.so$|\.dex$|BUNDLE-METADATA" || true
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
