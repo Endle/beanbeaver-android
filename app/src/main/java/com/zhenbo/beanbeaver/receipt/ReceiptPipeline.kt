@@ -142,6 +142,10 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
                 rememberScanDuration(wallMs)
                 logTimings(result, wallMs)
                 DebugInfoStore.recordSuccess(app, result, wallMs)
+                // Recorded at scan time, not at export: the spending screen is a
+                // view over everything scanned, and a receipt that is never
+                // exported still happened.
+                SpendStore.record(app, result, _capturedFile.value?.name, wallMs)
                 _status.value = ScanStatus.Done(result, wallMs)
             } catch (t: Throwable) {
                 progressJob?.cancel()
