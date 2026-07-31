@@ -1,4 +1,6 @@
+import com.android.build.api.artifact.SingleArtifact
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -186,6 +188,90 @@ android {
 
 tasks.named("preBuild").configure { dependsOn(syncOcrModels, syncLegalDocs) }
 
+/**
+ * The last gate before Play: read the finished `.aab` and refuse to leave behind
+ * one that would earn any of the three warnings the v0.4.0 upload earned.
+ *
+ * The counterpart to bbreceiptkit's verifyReleaseNativeProfile, which checks
+ * *provenance* before the build starts. This checks the *artifact* afterwards,
+ * so each catches a class of mistake the other cannot. Every message names the
+ * console text it prevents, so a failure here says which warning you avoided.
+ *
+ * Reads only the zip central directory — no decompression, no ELF parsing. The
+ * debug-symbols check is exact rather than heuristic: AGP's
+ * ExtractNativeDebugMetadataTask skips any library whose stripped output is the
+ * same length as its input, so a debugsymbols entry exists if and only if
+ * stripping genuinely happened. One entry proves both.
+ */
+val verifyReleaseBundle by tasks.registering {
+    group = "verification"
+    description = "Fail if the release .aab would earn a Play size / mapping / native-symbol warning."
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val bundle = variant.artifacts.get(SingleArtifact.BUNDLE)
+        verifyReleaseBundle.configure {
+            // Also establishes the dependency on :app:bundleRelease.
+            inputs.file(bundle).withPropertyName("bundle")
+            doLast {
+                val aab = bundle.get().asFile
+                val problems = mutableListOf<String>()
+
+                // Ceilings sit ~50% above the measured good build (38.4 MB bundle,
+                // 25.3 MB core lib). Raising either should be a deliberate,
+                // commented act, not a reflex when a build goes red.
+                val maxBundleBytes = 60L * 1024 * 1024
+                val maxCoreLibBytes = 40L * 1024 * 1024
+
+                if (aab.length() > maxBundleBytes) {
+                    problems += "the bundle is ${aab.length()} B, over the ${maxBundleBytes} B ceiling. " +
+                        "Play: \"This artifact significantly increases the size of APK(s) downloaded by users.\""
+                }
+
+                ZipFile(aab).use { zip ->
+                    val entries = zip.entries().toList()
+
+                    val core = entries.firstOrNull { it.name == CORE_LIB_ENTRY }
+                    if (core == null) {
+                        problems += "no $CORE_LIB_ENTRY in the bundle."
+                    } else if (core.size > maxCoreLibBytes) {
+                        problems += "$CORE_LIB_ENTRY is ${core.size} B uncompressed, over the " +
+                            "${maxCoreLibBytes} B ceiling. A stripped release build is ~25 MB; " +
+                            "~37 MB means AGP did not strip (check bb.ndkVersion resolves to an " +
+                            "installed NDK), and ~224 MB means a PROFILE=debug library."
+                    }
+
+                    if (entries.none { it.name.startsWith(DEBUG_SYMBOLS_PREFIX) }) {
+                        problems += "no native debug symbols under $DEBUG_SYMBOLS_PREFIX. AGP only " +
+                            "extracts them when stripping actually ran, so this means bb.ndkVersion " +
+                            "does not resolve to an installed NDK. " +
+                            "Play: \"you've not uploaded debug symbols\"."
+                    }
+
+                    if (entries.none { it.name == MAPPING_ENTRY }) {
+                        problems += "no $MAPPING_ENTRY — R8 did not run. " +
+                            "Play: \"There is no deobfuscation file associated with this App Bundle.\""
+                    }
+                }
+
+                if (problems.isNotEmpty()) {
+                    throw GradleException(
+                        problems.joinToString(
+                            prefix = "${aab.name} is not fit to upload:\n  - ",
+                            separator = "\n  - ",
+                        ),
+                    )
+                }
+            }
+        }
+        // AGP registers variant tasks after this script body runs, so bundleRelease
+        // doesn't exist yet; configureEach applies to it once it appears.
+        tasks.matching { it.name == "bundle${variant.name.replaceFirstChar(Char::uppercase)}" }
+            .configureEach { finalizedBy(verifyReleaseBundle) }
+    }
+}
+
 dependencies {
     implementation(project(":bbreceiptkit"))
 
@@ -219,3 +305,10 @@ dependencies {
     // Context-free for exactly this reason.
     testImplementation("junit:junit:4.13.2")
 }
+
+// Entry paths Gate B looks for. AGP writes the two BUNDLE-METADATA paths as
+// literal constants in PackageBundleTask; bundletool strips that directory, so
+// neither reaches a device — they exist only so Play can symbolicate and retrace.
+val CORE_LIB_ENTRY = "base/lib/arm64-v8a/libbb_receipt_ffi.so"
+val DEBUG_SYMBOLS_PREFIX = "BUNDLE-METADATA/com.android.tools.build.debugsymbols/"
+val MAPPING_ENTRY = "BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map"
