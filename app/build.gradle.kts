@@ -100,8 +100,8 @@ android {
         // Android 16. Play requires new apps/updates to target within one year
         // of the latest release (API 36 required from 2026-08-30).
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")

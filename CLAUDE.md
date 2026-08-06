@@ -136,14 +136,35 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.6.4**. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.7.11**. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
-  `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
-  first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
-  change means adapting `ReceiptScanner.kt` (as v0.5.0's `currency` +
-  `tax_account` did) **and `src/bin/batch_e2e.rs`** — nothing built that bin, so
-  it silently rotted against the v0.6.x `scan()` arity and `ScanTimings.spans`
-  until CI started compiling it.
+  `./build-xcframework.sh` in iOS. The v0.6.4 → v0.7.x range was the **rules
+  release**: `ReceiptItem.category` became `account`, `tags` became labelled
+  `[ItemTag]` nodes (stable `path` + authored `display`), the RuleBook crossed
+  the FFI (`tags()`/`categories()`/`rules()`/`explain()`), and `ParseOptions`
+  gained `rule_documents`. That was an FFI signature change — check
+  `crates/ffi/src/lib.rs` in the tag range first and adapt `ReceiptScanner.kt`
+  (ParseOptions param → `scanWithOptions`), `ReceiptResultJson` (the batch.json
+  decoder reads BOTH the pre-0.7.0 flat-string tags / `category` key and the new
+  `{path, display}` tags / `account` key), and `src/bin/batch_e2e.rs` (emits
+  `account`, not `category`; compare-e2e.py falls back for pre-0.7.0 output).
+  Nothing built that bin, so it silently rotted against the v0.6.x `scan()`
+  arity and `ScanTimings.spans` until CI started compiling it.
+- **Receipts are kept forever (until the user removes them).** `SpendStore`
+  (backed by `spend.json` next to `batch.json`) owns every scanned receipt and
+  its photo's lifetime — the substrate for the Spending screen, the Receipts
+  list, and the budget. There is deliberately **no age-based sweep**: the old
+  `ReceiptCaptureStore.clearOld` is gone. Deleting a receipt deletes its photo;
+  clearing a photo (Receipts screen or Settings → Receipts → Clear All Photos)
+  leaves every figure intact. The batch and single-scan paths record into
+  `SpendStore` at parse time, so draining the batch review queue on export never
+  loses a receipt. `BudgetPrefs`/`AmountPrivacy` hold the optional target and
+  the mask-everything preference (`hideAmounts`, default on).
+- **User rule documents live in `ItemRuleStore`** (`item_rules.json`), read at
+  scan time via `ParseOptions` — never snapshotted into the pipeline, so an
+  import applies to the very next scan. Validation is the core's: constructing a
+  `RuleBook` rejects malformed TOML, undeclared tag paths, and unknown
+  `disables` ids.
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
   is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.

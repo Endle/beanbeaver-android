@@ -1,6 +1,6 @@
 # BeanBeaver — Privacy Policy
 
-_Last updated: 2026-07-22_
+_Last updated: 2026-08-06_
 
 BeanBeaver ("the app") turns photos of grocery receipts into itemized,
 Beancount-formatted text **entirely on your device**. This policy explains what
@@ -26,6 +26,22 @@ advertising, and no server component.
 - **Storage.** Results stay in the app unless you explicitly export or share
   them using your device's own share feature, at which point they are handled by
   the destination you pick.
+
+## What stays on your device
+
+**A record of every receipt you scan is kept on your device.** BeanBeaver keeps
+this — merchant, date, line items, prices, category tags, and the total — in the
+app's private storage, along with the receipt's photo, because that record is
+what the Spending and budget screens are computed from. The budget itself adds
+no further data: it is derived from these records each time it is shown, and
+nothing about it is stored separately. These records are never uploaded as part
+of scanning.
+
+You can delete a single receipt at any time from the Receipts screen, delete
+every receipt at once, or clear just the photos while every figure stays exactly
+as it is — Settings → Receipts has both bulk actions, and each says plainly what
+it does and doesn't touch. Everything is deleted along with the app if you
+uninstall it.
 
 ## Third-party components
 
