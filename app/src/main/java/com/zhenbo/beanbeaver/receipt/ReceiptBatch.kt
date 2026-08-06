@@ -189,7 +189,11 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
                 try {
                     val result = withContext(Dispatchers.Default) {
                         val session = OcrSessionProvider.loaded(app)
-                        ReceiptScanner.scan(session, bytes, account, currency, taxAccount)
+                        ItemRuleStore.ensureLoaded(app)
+                        ReceiptScanner.scan(
+                            session, bytes, account, currency, taxAccount,
+                            ItemRuleStore.parseOptions(),
+                        )
                     }
                     val wallMs = (System.nanoTime() - started) / 1_000_000.0
                     setState(draft.id, DraftState.Parsed(result, wallMs))

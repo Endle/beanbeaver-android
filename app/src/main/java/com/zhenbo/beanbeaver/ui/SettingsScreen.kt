@@ -77,6 +77,7 @@ fun SettingsScreen(
     onOpenDataDump: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
+    onOpenItemRules: () -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -191,6 +192,17 @@ fun SettingsScreen(
                         },
                     )
                 }
+            }
+
+            SettingsSection(
+                footer = "See how items are sorted into accounts, check why a particular item was " +
+                    "categorized the way it was, and bring in your own rules.",
+            ) {
+                NavRow(
+                    title = "Categories & Tags",
+                    subtitle = "Tags · Accounts · Rules",
+                    onClick = onOpenItemRules,
+                )
             }
 
             if (premiumEnabled) {
