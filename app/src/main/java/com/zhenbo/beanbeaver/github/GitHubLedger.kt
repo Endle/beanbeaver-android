@@ -96,8 +96,14 @@ object GitHubLedger {
             onProgress(
                 if (filings.size == 1) "Checking what's already filed…"
                 else "Checking receipt ${index + 1} of ${filings.size}…")
-            val missing = filing.files.filterNot { fileExists(cfg, repoRoot, it.path, base) }
-            if (missing.isNotEmpty()) pending.add(missing)
+            // Identity, not filename: `basename` carries the export's clock time
+            // (`hhmm`), so a receipt re-filed a minute later would land on a
+            // path that has never existed and file itself twice. `folder` is
+            // derived only from merchant + date + image hash, so what's already
+            // in it is the real answer.
+            if (!isAlreadyFiled(cfg, repoRoot, filing.folder, base)) {
+                pending.add(filing.files)
+            }
         }
         if (pending.isEmpty()) {
             throw GitHubException(
@@ -192,11 +198,17 @@ object GitHubLedger {
         return "Filed a scanned receipt under `${only.folder}/` with BeanBeaver Android."
     }
 
-    /** Whether `path` already exists at `ref`. Content-addressed, so present = identical. */
-    private suspend fun fileExists(cfg: Config, repoRoot: String, path: String, ref: String): Boolean {
+    /**
+     * Whether [folder] already holds a filing for this receipt — one GET per
+     * receipt rather than one per file. Every path under `rootDir` is
+     * content-addressed (the sha8 token in the folder name), so a listing that
+     * contains a `.beancount` at all is necessarily this receipt's. This is what
+     * keeps re-exports idempotent despite `basename` carrying the clock time.
+     */
+    private suspend fun isAlreadyFiled(cfg: Config, repoRoot: String, folder: String, ref: String): Boolean {
         return try {
-            api(cfg, "GET", "$repoRoot/contents/${encodePath(path)}?ref=$ref")
-            true
+            val entries = apiArray(cfg, "GET", "$repoRoot/contents/${encodePath(folder)}?ref=$ref")
+            entries.any { (it as? JSONObject)?.optString("name")?.endsWith(".beancount") == true }
         } catch (e: HttpStatusException) {
             if (e.status == 404) false else throw e
         }
@@ -212,12 +224,39 @@ object GitHubLedger {
 
     // MARK: - Transport
 
-    /** A non-2xx that callers distinguish (404 = "file not found" for `fileExists`). */
+    /** A non-2xx that callers distinguish (404 = "file not found" for `isAlreadyFiled`). */
     private class HttpStatusException(val status: Int, message: String) : Exception(message)
 
     private suspend fun api(
         cfg: Config, method: String, pathAndQuery: String, body: JSONObject? = null,
-    ): JSONObject = withContext(Dispatchers.IO) {
+    ): JSONObject {
+        val text = http(cfg, method, pathAndQuery, body)
+        return try {
+            JSONObject(text)
+        } catch (e: Exception) {
+            throw GitHubException("Couldn't read GitHub's response ($pathAndQuery).")
+        }
+    }
+
+    /** Like [api] but for endpoints that return a JSON array — `contents/<folder>`
+     *  lists a directory as `[{name, type, …}]` rather than the single-file shape
+     *  [api]'s JSONObject parse would reject. */
+    private suspend fun apiArray(
+        cfg: Config, method: String, pathAndQuery: String, body: JSONObject? = null,
+    ): JSONArray {
+        val text = http(cfg, method, pathAndQuery, body)
+        return try {
+            JSONArray(text)
+        } catch (e: Exception) {
+            throw GitHubException("Couldn't read GitHub's response ($pathAndQuery).")
+        }
+    }
+
+    /** Shared HTTPS transport: one round trip, status handling and error mapping
+     *  for both [api] and [apiArray]. */
+    private suspend fun http(
+        cfg: Config, method: String, pathAndQuery: String, body: JSONObject?,
+    ): String = withContext(Dispatchers.IO) {
         val conn = URL("https://api.github.com$pathAndQuery").openConnection() as HttpURLConnection
         val code: Int
         val text: String
@@ -246,10 +285,6 @@ object GitHubLedger {
             if (code == 404) throw HttpStatusException(404, message)
             throw GitHubException("GitHub: $message")
         }
-        try {
-            JSONObject(text)
-        } catch (e: Exception) {
-            throw GitHubException("Couldn't read GitHub's response ($pathAndQuery).")
-        }
+        text
     }
 }
