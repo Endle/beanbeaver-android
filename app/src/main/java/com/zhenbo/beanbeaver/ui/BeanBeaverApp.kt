@@ -143,7 +143,6 @@ fun BeanBeaverApp(
     var showGitHubSettings by rememberSaveable { mutableStateOf(false) }
     var showItemRules by rememberSaveable { mutableStateOf(false) }
     var showSpending by rememberSaveable { mutableStateOf(false) }
-    var showReceipts by rememberSaveable { mutableStateOf(false) }
     var showDebug by rememberSaveable { mutableStateOf(false) }
     var showDataDump by rememberSaveable { mutableStateOf(false) }
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
@@ -157,9 +156,6 @@ fun BeanBeaverApp(
     val spendRecords by SpendStore.records.collectAsStateWithLifecycle()
     var hideAmounts by rememberSaveable { mutableStateOf(AmountPrivacy.hideAmounts(context)) }
 
-    // What "Clear Old Receipts" must spare: the photo behind the result screen the
-    // user is currently looking at, so it can't vanish out from under them, and
-    // every photo the pending import batch still needs.
     // The Receipts list opened from Spending carries the month it was reached
     // from; null = all receipts. Both this and the category drill-down hold a
     // non-null value only while their screen is open (remember, not Saveable —
