@@ -10,10 +10,18 @@ import java.util.UUID
  * images is a lot to hold at once, and the photo is the durable thing a parse is
  * always re-derivable from. Kotlin twin of iOS `ReceiptCaptureStore`.
  *
- * (The single-scan [ReceiptPipeline] still holds its one image in memory — it
- * scans one receipt at a time, so there's nothing to spill to disk.)
+ * (The single-scan [ReceiptPipeline] also writes its one image here, mirroring
+ * iOS — it's the durable thing a parse can always be re-derived from.)
+ *
+ * A capture is no longer expired by any heuristic here — once a scan succeeds,
+ * its photo is owned by that receipt's `SpendRecord` ([SpendStore]) and lives
+ * until the user deletes the receipt or clears its photo. This type only knows
+ * how to name, total, and delete captures; it has no opinion about which ones a
+ * caller should keep.
  */
 object ReceiptCaptureStore {
+    private const val PREFIX = "receipt_capture_"
+
     fun directory(context: Context): File =
         File(context.filesDir, "captures").apply { mkdirs() }
 
@@ -22,34 +30,16 @@ object ReceiptCaptureStore {
 
     /** A fresh, collision-free capture file (its bytes not yet written). */
     fun newCaptureFile(context: Context): File =
-        File(directory(context), "receipt_capture_${UUID.randomUUID()}.jpg")
+        File(directory(context), "${PREFIX}${UUID.randomUUID()}.jpg")
+
+    /** Delete one capture by name. A no-op if it's already gone. The caller —
+     *  `SpendStore`, today — is the one that knows whether anything still needs
+     *  this photo. */
+    fun delete(context: Context, filename: String) {
+        runCatching { file(context, filename).delete() }
+    }
 
     /** How much disk every kept receipt photo is using, for the Settings row. */
     fun totalBytes(context: Context): Long =
         directory(context).listFiles()?.sumOf { it.length() } ?: 0L
-
-    /** What a purge removed, so the caller can say so concretely. */
-    data class ClearResult(val count: Int, val bytes: Long)
-
-    /**
-     * Delete every capture except the ones named in [keeping]. Android twin of
-     * iOS `ReceiptCaptureStore.clearOld(keeping:)`.
-     *
-     * The exemptions matter: the photo behind a result screen the user is still
-     * looking at must not vanish from under them, and neither must one the
-     * pending import batch still needs to parse or export.
-     */
-    fun clearOld(context: Context, keeping: Set<String>): ClearResult {
-        var count = 0
-        var bytes = 0L
-        directory(context).listFiles()?.forEach { file ->
-            if (file.name in keeping) return@forEach
-            val size = file.length()
-            if (file.delete()) {
-                count++
-                bytes += size
-            }
-        }
-        return ClearResult(count, bytes)
-    }
 }

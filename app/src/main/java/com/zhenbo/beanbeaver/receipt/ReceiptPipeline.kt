@@ -142,6 +142,7 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
                 rememberScanDuration(wallMs)
                 logTimings(result, wallMs)
                 DebugInfoStore.recordSuccess(app, result, wallMs)
+                SpendStore.record(app, result, _capturedFile.value?.name, wallMs)
                 _status.value = ScanStatus.Done(result, wallMs)
             } catch (t: Throwable) {
                 progressJob?.cancel()

@@ -114,16 +114,23 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Removing
 
-    /** Drop a draft, photo and all — nothing else refers to the photo, and it's the user's storage. */
+    /** Drop a draft, photo and all — an explicit "I don't want this receipt".
+     *  Also drops the matching `SpendRecord`, if this draft had already parsed
+     *  and recorded one, so a discarded import doesn't quietly stay in someone's
+     *  spend figures. */
     fun remove(id: String) {
         val draft = _drafts.value.firstOrNull { it.id == id } ?: return
+        SpendStore.removeRecords(getApplication(), setOf(draft.captureFilename))
         deleteCapture(draft)
         mutate { list -> list.removeAll { it.id == id } }
     }
 
-    /** Throw the whole batch away. Cancels any scan in flight — no point finishing one for a draft that's going. */
+    /** Throw the whole batch away. Cancels any scan in flight — no point finishing
+     *  one for a draft that's going. Also drops any `SpendRecord`s the discarded
+     *  drafts had already parsed and recorded, same reasoning as [remove]. */
     fun discardAll() {
         stopParsing()
+        SpendStore.removeRecords(getApplication(), _drafts.value.map { it.captureFilename }.toSet())
         _drafts.value.forEach(::deleteCapture)
         mutate { it.clear() }
     }
@@ -198,6 +205,7 @@ class ReceiptBatch(app: Application) : AndroidViewModel(app) {
                     val wallMs = (System.nanoTime() - started) / 1_000_000.0
                     setState(draft.id, DraftState.Parsed(result, wallMs))
                     DebugInfoStore.recordSuccess(app, result, wallMs)
+                    SpendStore.record(app, result, draft.captureFilename, wallMs)
                 } catch (t: Throwable) {
                     Log.e(TAG, "batch scan failed", t)
                     setState(draft.id, DraftState.Failed(t.message ?: t.toString()))

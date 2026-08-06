@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -85,7 +87,10 @@ import com.zhenbo.beanbeaver.github.LedgerEntry
 import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
 import com.zhenbo.beanbeaver.receipt.ReceiptPipeline
+import com.zhenbo.beanbeaver.receipt.AmountPrivacy
 import com.zhenbo.beanbeaver.receipt.ScanStatus
+import com.zhenbo.beanbeaver.receipt.SpendStore
+import com.zhenbo.beanbeaver.receipt.SpendSummary
 import com.zhenbo.beanbeaver.receipt.label
 import com.zhenbo.beanbeaver.receipt.totalMs
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
@@ -95,6 +100,18 @@ import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
 import uniffi.bb_receipt_ffi.ScanTimings
+
+/** The Receipts list opened from Spending carries the month it was reached from;
+ *  null shows every receipt. */
+private data class ReceiptsNav(val monthFilter: String?)
+
+/** The category drill-down a Spending row opened — scoped to the month it was
+ *  reached from, so the list can't silently change what the number referred to. */
+private data class CategoryNav(
+    val category: SpendSummary.Category,
+    val title: String,
+    val monthID: String,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,6 +142,8 @@ fun BeanBeaverApp(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showGitHubSettings by rememberSaveable { mutableStateOf(false) }
     var showItemRules by rememberSaveable { mutableStateOf(false) }
+    var showSpending by rememberSaveable { mutableStateOf(false) }
+    var showReceipts by rememberSaveable { mutableStateOf(false) }
     var showDebug by rememberSaveable { mutableStateOf(false) }
     var showDataDump by rememberSaveable { mutableStateOf(false) }
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
@@ -134,15 +153,26 @@ fun BeanBeaverApp(
     var showBatch by rememberSaveable { mutableStateOf(false) }
     val image = capturedImage
 
+    SpendStore.ensureLoaded(context)
+    val spendRecords by SpendStore.records.collectAsStateWithLifecycle()
+    var hideAmounts by rememberSaveable { mutableStateOf(AmountPrivacy.hideAmounts(context)) }
+
     // What "Clear Old Receipts" must spare: the photo behind the result screen the
     // user is currently looking at, so it can't vanish out from under them, and
     // every photo the pending import batch still needs.
-    val capturedFile by pipeline.capturedFile.collectAsStateWithLifecycle()
-    val batchDrafts by batch.drafts.collectAsStateWithLifecycle()
-    val keptCaptureFilenames = buildSet {
-        capturedFile?.let { add(it.name) }
-        batchDrafts.forEach { add(it.captureFilename) }
-    }
+    // The Receipts list opened from Spending carries the month it was reached
+    // from; null = all receipts. Both this and the category drill-down hold a
+    // non-null value only while their screen is open (remember, not Saveable —
+    // transient nav state that needn't survive a process kill).
+    var receiptsNav by remember { mutableStateOf<ReceiptsNav?>(null) }
+    var categoryNav by remember { mutableStateOf<CategoryNav?>(null) }
+
+    // Only the camera path offers to keep a copy: a photo-library import is
+    // already in the library, so saving it back would just duplicate it.
+    val startScan = rememberDocumentScanLauncher(onImage = { bytes ->
+        if (PhotoSaver.isEnabled(context)) PhotoSaver.save(context, bytes)
+        pipeline.scan(bytes)
+    })
 
     // Sub-screens as boolean-gated early returns (a small nav "stack"): GitHub and
     // Debug sit above Settings, so backing out of them returns to Settings.
@@ -152,6 +182,41 @@ fun BeanBeaverApp(
     }
     if (showItemRules) {
         ItemRulesScreen(onBack = { showItemRules = false })
+        return
+    }
+    if (showSpending) {
+        SpendingScreen(
+            onScan = {
+                showSpending = false
+                startScan()
+            },
+            onOpenReceipts = { month -> receiptsNav = ReceiptsNav(month) },
+            onOpenCategory = { category, title, monthID ->
+                categoryNav = CategoryNav(category, title, monthID)
+            },
+            onBack = { showSpending = false },
+        )
+        return
+    }
+    receiptsNav?.let { nav ->
+        ReceiptsScreen(
+            monthFilter = nav.monthFilter,
+            githubConfigured = ghConfigured,
+            exportRunning = exportRunning,
+            exportMessage = exportMessage,
+            onExportEntries = { entries -> githubVm.export(entries) },
+            onConfigureExport = { showGitHubSettings = true },
+            onBack = { receiptsNav = null },
+        )
+        return
+    }
+    categoryNav?.let { nav ->
+        CategoryItemsScreen(
+            category = nav.category,
+            title = nav.title,
+            monthID = nav.monthID,
+            onBack = { categoryNav = null },
+        )
         return
     }
     if (showDebug) {
@@ -208,7 +273,6 @@ fun BeanBeaverApp(
             },
             githubConnected = ghConnected,
             githubAccount = ghAccount,
-            keptCaptureFilenames = keptCaptureFilenames,
             onOpenGitHub = { showGitHubSettings = true },
             onOpenItemRules = { showItemRules = true },
             onOpenDebug = { showDebug = true },
@@ -219,13 +283,6 @@ fun BeanBeaverApp(
         )
         return
     }
-
-    // Only the camera path offers to keep a copy: a photo-library import is
-    // already in the library, so saving it back would just duplicate it.
-    val startScan = rememberDocumentScanLauncher(onImage = { bytes ->
-        if (PhotoSaver.isEnabled(context)) PhotoSaver.save(context, bytes)
-        pipeline.scan(bytes)
-    })
 
     val isDone = status is ScanStatus.Done
 
@@ -270,6 +327,18 @@ fun BeanBeaverApp(
                 is ScanStatus.Idle -> HomePane(
                     onScan = startScan,
                     onImportPhotos = { showBatch = true },
+                    spendMonth = if (spendRecords.isEmpty()) null
+                    else SpendSummary.month(
+                        SpendSummary.defaultMonthId(from = spendRecords),
+                        from = spendRecords,
+                    ),
+                    hideAmounts = hideAmounts,
+                    onToggleAmounts = {
+                        hideAmounts = !hideAmounts
+                        AmountPrivacy.setHideAmounts(context, hideAmounts)
+                    },
+                    onOpenSpending = { showSpending = true },
+                    onOpenReceipts = { receiptsNav = ReceiptsNav(null) },
                     exportReady = ghConfigured,
                     onExport = { showGitHubSettings = true },
                     onSettings = { showSettings = true },
@@ -375,6 +444,9 @@ private fun shareMoneyManager(context: Context, results: List<ReceiptResult>) {
         .onSuccess { file ->
             ShareFile.share(
                 context, file, ShareFile.XLSX_MIME, "Export to Money Manager")
+            // Marked at presentation, not confirmed delivery — the share sheet may
+            // be cancelled — which is why the Receipts row says "Shared".
+            SpendStore.markShared(context, results)
         }
         .onFailure {
             DebugInfoStore.recordExportFailure(
@@ -390,6 +462,11 @@ private fun shareMoneyManager(context: Context, results: List<ReceiptResult>) {
 private fun HomePane(
     onScan: () -> Unit,
     onImportPhotos: () -> Unit,
+    spendMonth: SpendSummary.Month?,
+    hideAmounts: Boolean,
+    onToggleAmounts: () -> Unit,
+    onOpenSpending: () -> Unit,
+    onOpenReceipts: () -> Unit,
     exportReady: Boolean,
     onExport: () -> Unit,
     onSettings: () -> Unit,
@@ -408,6 +485,20 @@ private fun HomePane(
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 24.dp),
         )
+
+        // The month's tracked spend, right on the home screen — the one number
+        // the app exists to produce. Hidden until something has been scanned: a
+        // card reading $0.00 is worse than no card. Both the card and the
+        // Spending screen open on the newest month with receipts, so they can't
+        // advertise one month and hand you another.
+        spendMonth?.let { month ->
+            SpendCard(
+                month = month,
+                hideAmounts = hideAmounts,
+                onToggleAmounts = onToggleAmounts,
+                onOpenSpending = onOpenSpending,
+            )
+        }
 
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -428,6 +519,14 @@ private fun HomePane(
                 Icon(Icons.Default.PhotoLibrary, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Import from Photos", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = onOpenReceipts,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Photo, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Receipts", fontWeight = FontWeight.SemiBold)
             }
             OutlinedButton(
                 onClick = onExport,
@@ -461,6 +560,53 @@ private fun HomePane(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+        }
+    }
+}
+
+/**
+ * The current month's tracked spend, live on the home screen — the way through
+ * to `SpendingView`. Two sibling tap targets, not one nested in the other: an
+ * eye laid over the card's own Button would lose the hit test to it, so tapping
+ * the eye pushed Spending instead of unmasking.
+ */
+@Composable
+private fun SpendCard(
+    month: SpendSummary.Month,
+    hideAmounts: Boolean,
+    onToggleAmounts: () -> Unit,
+    onOpenSpending: () -> Unit,
+) {
+    BbCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onOpenSpending),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    month.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (hideAmounts) AmountPrivacy.PLACEHOLDER else priceCurrency(month.tracked),
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "tracked spend · ${month.receiptCount} receipt${if (month.receiptCount == 1) "" else "s"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onToggleAmounts) {
+                Icon(
+                    if (hideAmounts) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (hideAmounts) "Show amounts" else "Hide amounts",
+                )
+            }
         }
     }
 }

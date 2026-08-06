@@ -77,6 +77,7 @@ import com.zhenbo.beanbeaver.receipt.DraftState
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
 import com.zhenbo.beanbeaver.receipt.ReceiptCaptureStore
 import com.zhenbo.beanbeaver.receipt.ReceiptDraft
+import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.receipt.needsAttention
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
@@ -568,6 +569,9 @@ private fun shareMoneyManagerBatch(context: Context, results: List<ReceiptResult
     runCatching { MoneyManagerExport.makeFile(context, results) }
         .onSuccess { file ->
             ShareFile.share(context, file, ShareFile.XLSX_MIME, "Export to Money Manager")
+            // Marked at presentation, not confirmed delivery — the share sheet may
+            // be cancelled — which is why the Receipts row says "Shared".
+            SpendStore.markShared(context, results)
         }
         .onFailure {
             DebugInfoStore.recordExportFailure(
