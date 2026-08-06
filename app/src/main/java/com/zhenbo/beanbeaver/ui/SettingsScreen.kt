@@ -1,5 +1,9 @@
 package com.zhenbo.beanbeaver.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -142,27 +146,6 @@ fun SettingsScreen(
             }
 
             SettingsSection(
-                footer = "Store a .json alongside each exported receipt — its items, prices, and category " +
-                    "tags — next to the beancount and photo. Applies to every export destination.",
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Save details file",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = includeDetailsJson,
-                        onCheckedChange = {
-                            includeDetailsJson = it
-                            LedgerFileOptions.setIncludeDetailsJson(context, it)
-                        },
-                    )
-                }
-            }
-
-            SettingsSection(
-                title = "Ledger",
                 footer = "The currency and tax account used in every beancount entry BeanBeaver generates. " +
                     "Currency defaults to your region. Takes effect on the next scan.",
             ) {
@@ -183,6 +166,30 @@ fun SettingsScreen(
                 ) {
                     taxAccount = it
                     LedgerFormatPrefs.setTaxAccount(context, it)
+                }
+            }
+
+            // Sits right under Ledger rather than at the top of the page: it's the
+            // same kind of setting — what an export writes — and it's a narrow one.
+            // Still its own section, not folded into Ledger, because it spans every
+            // file backend rather than the beancount format.
+            SettingsSection(
+                footer = "Store a .json alongside each exported receipt — its items, prices, and category " +
+                    "tags — next to the beancount and photo. Applies to every export destination.",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Save details file",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = includeDetailsJson,
+                        onCheckedChange = {
+                            includeDetailsJson = it
+                            LedgerFileOptions.setIncludeDetailsJson(context, it)
+                        },
+                    )
                 }
             }
 
@@ -315,6 +322,26 @@ fun SettingsScreen(
                 LabeledRow("BeanBeaver", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 LabeledRow("beanbeaver-core", BuildConfig.CORE_VERSION)
             }
+
+            // Where to reach the project. Placed directly under About so the two
+            // read as one move: the versions to quote, then somewhere to quote them.
+            SettingsSection(
+                title = "Feedback",
+                footer = "Questions, bugs, and receipts that came out wrong — whichever room suits you. " +
+                    "When it's a scan problem, include the two versions above.",
+            ) {
+                NavRow(
+                    title = "Discord",
+                    subtitle = "discord.gg/qsfS7uUMHQ",
+                    onClick = { openUrl(context, "https://discord.gg/qsfS7uUMHQ") },
+                )
+                Spacer(Modifier.size(8.dp))
+                NavRow(
+                    title = "Matrix",
+                    subtitle = "matrix.to/#/#beanbeaver:matrix.org",
+                    onClick = { openUrl(context, "https://matrix.to/#/#beanbeaver:matrix.org") },
+                )
+            }
         }
     }
 
@@ -431,5 +458,22 @@ private fun LabeledRow(label: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Hand a URL to the system — the Android analog of iOS `Link`, which is what
+ * lets the platform open the Discord/Element app when installed and fall back to
+ * a browser. A typo'd URL is reported in place rather than crashing, so a bad
+ * row drops to a toast instead of trapping the screen.
+ */
+private fun openUrl(context: Context, url: String) {
+    val intent = runCatching { Intent(Intent.ACTION_VIEW, Uri.parse(url)) }.getOrNull()
+    if (intent == null) {
+        Toast.makeText(context, "Couldn't open that link.", Toast.LENGTH_SHORT).show()
+        return
+    }
+    runCatching { context.startActivity(intent) }.onFailure {
+        Toast.makeText(context, "No app can open that link.", Toast.LENGTH_SHORT).show()
     }
 }
