@@ -81,13 +81,17 @@ object DebugInfoStore {
     private fun receiptJson(r: ReceiptResult, wallMs: Double?): JSONObject {
         val items = JSONArray()
         r.items.forEach {
+            val tags = JSONArray()
+            it.tags.forEach { tag ->
+                tags.put(JSONObject().put("path", tag.path).put("display", tag.display))
+            }
             items.put(
                 JSONObject()
                     .put("description", it.description)
                     .put("price", it.price)
                     .put("quantity", it.quantity)
-                    .put("category", it.category ?: JSONObject.NULL)
-                    .put("tags", JSONArray(it.tags)),
+                    .put("account", it.account ?: JSONObject.NULL)
+                    .put("tags", tags),
             )
         }
         val warnings = JSONArray()

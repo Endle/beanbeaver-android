@@ -140,10 +140,10 @@ fn success_json(name: &str, r: &bb_receipt_ffi::ReceiptResult, wall_ms: f64) -> 
         .iter()
         .map(|i| {
             format!(
-                "        {{\"description\":{},\"price\":{},\"category\":{}}}",
+                "        {{\"description\":{},\"price\":{},\"account\":{}}}",
                 json_str(&i.description),
                 json_str(&i.price),
-                match &i.category {
+                match &i.account {
                     Some(c) => json_str(c),
                     None => "null".into(),
                 }

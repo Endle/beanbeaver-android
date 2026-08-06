@@ -3,6 +3,7 @@ package com.zhenbo.beanbeaver.receipt
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.bb_receipt_ffi.FieldConfidences
+import uniffi.bb_receipt_ffi.ItemTag
 import uniffi.bb_receipt_ffi.MerchantMatch
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.Phase
@@ -33,8 +34,8 @@ object ReceiptResultJson {
                     .put("description", item.description)
                     .put("price", item.price)
                     .put("quantity", item.quantity)
-                    .put("category", item.category ?: JSONObject.NULL)
-                    .put("tags", JSONArray(item.tags)),
+                    .put("account", item.account ?: JSONObject.NULL)
+                    .put("tags", encodeTags(item.tags)),
             )
         }
         val spans = JSONArray()
@@ -78,8 +79,14 @@ object ReceiptResultJson {
                 description = item.getString("description"),
                 price = item.getString("price"),
                 quantity = item.getInt("quantity"),
-                category = item.optNullableString("category"),
-                tags = item.getJSONArray("tags").strings(),
+                // The core renamed `category` → `account` in v0.7.0. A batch saved
+                // by an older build is still in Application Support when the app
+                // updates, so read BOTH shapes. The old `category` deliberately
+                // does NOT become `account`: it held a classifier key
+                // (`grocery_dairy`), not necessarily a beancount account, so
+                // copying it across would fabricate a wrong account.
+                account = item.optNullableString("account") ?: item.optNullableString("category"),
+                tags = decodeTags(item.getJSONArray("tags")),
             )
         }
 
@@ -116,6 +123,32 @@ object ReceiptResultJson {
             detections = emptyList(),
         )
     }
+    private fun encodeTags(tags: List<ItemTag>): JSONArray =
+        JSONArray().also { arr ->
+            tags.forEach { tag ->
+                arr.put(JSONObject().put("path", tag.path).put("display", tag.display))
+            }
+        }
+
+    /**
+     * Read the persisted tag list, accepting BOTH the post-0.7.0 object shape
+     * (`{path, display}`) and the pre-0.7.0 flat-string shape. A legacy flat
+     * string becomes an `ItemTag` with a capitalized fallback label — which is
+     * all the old `tagDisplay` ever showed anyway (mirrors iOS).
+     */
+    private fun decodeTags(arr: JSONArray): List<ItemTag> =
+        (0 until arr.length()).map { i ->
+            when (val el = arr.get(i)) {
+                is JSONObject -> ItemTag(
+                    path = el.getString("path"),
+                    display = el.optString("display"),
+                )
+                else -> ItemTag(
+                    path = el.toString(),
+                    display = el.toString().replaceFirstChar { it.uppercase() },
+                )
+            }
+        }
 }
 
 // `optString` returns "" for JSON null, which would resurrect an empty string

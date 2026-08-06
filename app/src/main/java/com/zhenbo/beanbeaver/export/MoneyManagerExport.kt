@@ -1,6 +1,7 @@
 package com.zhenbo.beanbeaver.export
 
 import android.content.Context
+import com.zhenbo.beanbeaver.ui.priceValue
 import com.zhenbo.beanbeaver.ui.tagDisplay
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
@@ -141,8 +142,7 @@ object MoneyManagerExport {
     internal data class Amount(val magnitude: String, val isNegative: Boolean)
 
     internal fun amountString(raw: String): Amount {
-        val filtered = raw.filter { it.isDigit() || it == '.' || it == '-' }
-        val value = filtered.toDoubleOrNull() ?: return Amount("0.00", false)
+        val value = priceValue(raw) ?: return Amount("0.00", false)
         return Amount("%.2f".format(abs(value)), value < 0)
     }
 

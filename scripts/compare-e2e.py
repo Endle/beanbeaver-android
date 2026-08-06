@@ -118,7 +118,11 @@ def check_items(res, exp, tol=frozenset()):
             return False
         want_cat = c.get("category")
         if want_cat and not c.get("category_optional") and not category_tolerated(pat, tol):
-            cats = [it.get("category") or "" for it in matches if dec(it.get("price")) == want_price]
+            # The core renamed the field `category` → `account` in v0.7.0 (it now
+            # always holds a beancount account, not a classifier key); read the
+            # new name, falling back to the old one for pre-0.7.0 output.
+            cats = [it.get("account") or it.get("category") or ""
+                    for it in matches if dec(it.get("price")) == want_price]
             if not any(want_cat in cat for cat in cats):
                 return False
     return True

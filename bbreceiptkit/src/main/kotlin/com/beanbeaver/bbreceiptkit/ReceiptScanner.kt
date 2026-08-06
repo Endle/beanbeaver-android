@@ -2,6 +2,7 @@ package com.beanbeaver.bbreceiptkit
 
 import uniffi.bb_receipt_ffi.DateYmd
 import uniffi.bb_receipt_ffi.OcrSession
+import uniffi.bb_receipt_ffi.ParseOptions
 import uniffi.bb_receipt_ffi.ReceiptResult
 import java.io.File
 import java.time.LocalDate
@@ -33,6 +34,10 @@ object ReceiptScanner {
      * is where the tax posting lands. Since v0.5.0 the core no longer hard-codes
      * Canadian defaults; this MVP passes CAD / HST until Android grows settings.
      *
+     * `options` is the rule overlay applied after OCR (since core v0.7.0).
+     * Defaults to the bundled corpus, so existing callers are unaffected; the
+     * app passes the user's imported documents here (`ItemRuleStore`).
+     *
      * UniFFI 0.28 maps Rust `Vec<u8>` → Kotlin `ByteArray` for this crate.
      */
     fun scan(
@@ -41,6 +46,10 @@ object ReceiptScanner {
         creditCardAccount: String,
         currency: String = "CAD",
         taxAccount: String = "Expenses:Tax:HST",
+        options: ParseOptions = ParseOptions(
+            ruleDocuments = emptyList(),
+            knownMerchants = emptyList(),
+        ),
     ): ReceiptResult {
         val today = LocalDate.now()
         val date = DateYmd(
@@ -48,6 +57,7 @@ object ReceiptScanner {
             month = today.monthValue.toUInt(),
             day = today.dayOfMonth.toUInt(),
         )
-        return session.scan(imageData, date, creditCardAccount, currency, taxAccount)
+        return session.scanWithOptions(
+            imageData, date, creditCardAccount, currency, taxAccount, options)
     }
 }

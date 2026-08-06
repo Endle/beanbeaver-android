@@ -74,13 +74,17 @@ data class LedgerEntry(
         private fun buildJson(result: ReceiptResult, wallMs: Double?): JSONObject {
             val items = JSONArray()
             result.items.forEach { item ->
+                val tags = JSONArray()
+                item.tags.forEach { tag ->
+                    tags.put(JSONObject().put("path", tag.path).put("display", tag.display))
+                }
                 items.put(
                     JSONObject()
                         .put("description", item.description)
                         .put("price", item.price)
                         .put("quantity", item.quantity)
-                        .put("category", item.category ?: JSONObject.NULL)
-                        .put("tags", JSONArray(item.tags)),
+                        .put("account", item.account ?: JSONObject.NULL)
+                        .put("tags", tags),
                 )
             }
             val t = result.timings

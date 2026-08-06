@@ -3,6 +3,7 @@ package com.zhenbo.beanbeaver.ui
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import uniffi.bb_receipt_ffi.ItemTag
 
 /**
  * The display helpers are the iOS twins in `Theme.swift` — the two apps are
@@ -25,16 +26,30 @@ class FormatTest {
     }
 
     @Test
-    fun `tags lead with the most specific`() {
-        val display = tagDisplay(listOf("grocery", "meat", "chicken"))
+    fun `tags lead with the most specific, using authored labels verbatim`() {
+        val display = tagDisplay(
+            listOf(
+                ItemTag(path = "grocery", display = "Grocery"),
+                ItemTag(path = "grocery/meat", display = "Meat"),
+                ItemTag(path = "grocery/meat/chicken", display = "Chicken"),
+            ),
+        )
         assertEquals("Chicken", display.primary)
         assertEquals(listOf("Grocery", "Meat"), display.rest)
+    }
+
+    /** The authored label is used as-is — capitalizing the path rendered
+     *  `energy_drink` as "Energy_drink" before v0.7.0. */
+    @Test
+    fun `authored display is not re-derived from the path`() {
+        val display = tagDisplay(listOf(ItemTag(path = "grocery/drink/energy_drink", display = "Energy Drink")))
+        assertEquals("Energy Drink", display.primary)
     }
 
     @Test
     fun `empty tags have no primary`() {
         assertNull(tagDisplay(emptyList()).primary)
-        assertNull(tagDisplay(listOf("")).primary)
+        assertNull(tagDisplay(listOf(ItemTag(path = "x", display = ""))).primary)
     }
 
     @Test

@@ -17,13 +17,15 @@ name = "batch_e2e"
 path = "src/bin/batch_e2e.rs"
 
 [dependencies]
-# In step with the iOS root Cargo.toml. v0.6.0 → v0.6.4 is parser/rules work
-# only — typed line roles, a graded OCR glyph-confusion model, merchant-scoped
-# abbreviations, and stacked-logo line grouping — so the FFI surface is
-# unchanged (the only crates/ffi diff in that range is rustfmt). Same photo,
-# better parse; no Kotlin call sites move.
+# In step with the iOS root Cargo.toml. v0.6.4 → v0.7.x is the rules release:
+# `ReceiptItem.category` became `account`, `tags` became labelled `[ItemTag]`
+# nodes (stable `path` + authored `display`), the RuleBook crossed the FFI
+# (tags()/categories()/rules()/explain()), and ParseOptions gained
+# `rule_documents` for user rule overlays. That is an FFI signature change —
+# ReceiptScanner.kt, ReceiptResultJson.kt and src/bin/batch_e2e.rs were all
+# adapted in the same change (see CLAUDE.md: "FFI signature change" path).
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.6.4" }
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.7.11" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }
