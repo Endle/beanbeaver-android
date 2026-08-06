@@ -138,7 +138,14 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
 - **Core tag:** in step with iOS at **v0.7.11**. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
-  `./build-xcframework.sh` in iOS. The v0.6.4 → v0.7.x range was the **rules
+  `./build-xcframework.sh` in iOS. To read the exact UniFFI surface at a tag
+  without cloning the core repo, fetch
+  `https://raw.githubusercontent.com/Endle/beanbeaver-core/<tag>/crates/ffi/src/lib.rs`
+  — it's `#[uniffi::export]`-macro based (no `.udl`). UniFFI camelCases Rust
+  snake_case into Kotlin names (`scan_with_options` → `scanWithOptions`,
+  `beanbeaver_id` → `beanbeaverId`), `#[uniffi::constructor] fn new` becomes a
+  Kotlin primary constructor (`RuleBook(...)`), and `Result<T, ScanError>` throws.
+  The v0.6.4 → v0.7.x range was the **rules
   release**: `ReceiptItem.category` became `account`, `tags` became labelled
   `[ItemTag]` nodes (stable `path` + authored `display`), the RuleBook crossed
   the FFI (`tags()`/`categories()`/`rules()`/`explain()`), and `ParseOptions`
@@ -168,3 +175,61 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
   is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.
+
+## Staying in step with beanbeaver-ios
+
+This repo is a deliberately parallel port of `beanbeaver-ios` (same core, same
+UI language). When either side ships, the other usually has a twin to port.
+The workflow that keeps the catch-up cheap:
+
+**Find what's missing.** Both repos live under `~/src/opencode/`. The last
+Android commit that closed gaps marks the fork point:
+
+```bash
+git -C ~/src/opencode/beanbeaver-android log --oneline master | head -1   # fork point
+git -C ~/src/opencode/beanbeaver-ios log --oneline --since=<fork date>
+```
+
+Everything iOS committed after that date is the port backlog. iOS commit
+subjects carry the feature name; port them one commit at a time.
+
+**Where each iOS feature lives here.** Feature port = find the iOS file in the
+left column, port it to its Android twin:
+
+| iOS (`BeanBeaver/BeanBeaver/…`) | Android twin |
+|---|---|
+| `ContentView.swift` (home, `ReceiptCard`, `SettingsView`) | `ui/BeanBeaverApp.kt`, `ui/SettingsScreen.kt` |
+| `ReceiptPipeline.swift` / `ReceiptBatch.swift` / `BatchImportView.swift` | `receipt/ReceiptPipeline.kt`, `receipt/ReceiptBatch.kt`, `ui/BatchImportScreen.kt` |
+| `ReceiptCaptureStore.swift` | `receipt/ReceiptCaptureStore.kt` |
+| `SpendStore.swift` / `SpendSummary.swift` | `receipt/SpendStore.kt`, `receipt/SpendSummary.kt` |
+| `SpendingView.swift` / `ReceiptsView.swift` / `CategoryItemsView.swift` | `ui/SpendingScreen.kt`, `ui/ReceiptsScreen.kt`, `ui/CategoryItemsScreen.kt` |
+| `ItemRuleStore.swift` / `ItemRulesView.swift` | `receipt/ItemRuleStore.kt`, `ui/ItemRulesScreen.kt` |
+| `Theme.swift` (`CategoryDisplay`/`PriceFormat`/`ReceiptDateFormat`/`AmountPrivacy`) | `ui/Format.kt` + `receipt/SpendPrefs.kt` |
+| `LedgerExport.swift` / `LedgerSettingsView.swift` | `export/LedgerExport.kt` + `github/GitHubSyncViewModel.kt`, `ui/GitHubSettingsScreen.kt` |
+| `GitHubLedger.swift` / `GitHubDeviceFlow.swift` | `github/GitHubLedger.kt` / `github/GitHubApp.kt` |
+| `MoneyManagerExport.swift` | `export/MoneyManagerExport.kt` |
+| `DebugInfoStore.swift` / `DataDump.swift` / `Entitlements.swift` | `debug/…`, `Entitlements.kt` |
+
+**Port ledger (done 2026-08-06, branch `catch_up_ios_0806`, iOS @ v0.7.11):**
+Feedback section · core v0.6.4 → v0.7.11 + FFI adaptation · Categories & Tags
+browser + rule import · spend tracking (Spending/Receipts/category drill-down,
+home card, amount masking, optional monthly budget) · receipts kept-until-removed
+retention · GitHub re-export idempotency.
+
+**Deliberately not ported** (don't re-investigate): iOS launch-arg harnesses
+(`-dumpSpending`, `-showAmounts`, `-scrollToDebug`, `-showBatchImport`) — Android
+has no process-args convention; use logcat and `scripts/` instead. The Files-inbox
+ledger destination is commented out on iOS too, so Android has no twin by design.
+iOS's CI ORT-cache self-heal is iOS-specific.
+
+**Verifying a port on this Linux box is limited.** There is no JDK or Android
+SDK here, and host rustc 1.85 is too old for v0.7.x `ort` (needs 1.88), so
+`./gradlew` and `cargo check` both fail. What *does* work: brace-balance +
+reference greps, and `cargo update -p bb-receipt-ffi` after a tag bump (network
+works). Real verification happens on the Apple-Silicon Mac:
+`./build-android.sh` (regenerates the **git-ignored** UniFFI Kotlin bindings +
+`.so` — the Kotlin won't compile until this runs) then
+`./gradlew :app:assembleDebug` and `:app:testDebugUnitTest`. If a change touches
+FFI-facing code, compile it on the Mac first: `cargo check --bin batch_e2e`
+(CI builds that bin, and it has silently rotted before).
+
