@@ -188,14 +188,16 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.7.1**. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.7.11**. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
   change means adapting `ReceiptScanner.kt` (as v0.5.0's `currency` +
   `tax_account` did) **and `src/bin/batch_e2e.rs`** — nothing built that bin, so
   it silently rotted against the v0.6.x `scan()` arity and `ScanTimings.spans`
-  until CI started compiling it.
+  until CI started compiling it. The one-command check is
+  `git -C ../beanbeaver-core diff <from> <to> -- crates/ffi/src/lib.rs`; empty
+  output means only the parse changed (v0.7.1 → v0.7.11 was empty).
 - **A field rename reaches further than its call sites.** v0.7.0's
   `ReceiptItem.category -> account` and `tags: [String] -> [ItemTag]` also moved
   three JSON writers (`LedgerEntry` sidecar, `DebugInfoStore`, `BatchRunner`),
@@ -224,3 +226,64 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
   shared scaffold (`DocumentScaffold`, `DetailScaffold`) carries a single one on
   behalf of all its callers. Adding a screen without one is the easiest way to
   regress this, and it will not show up in a build or a unit test.
+- **GitHub filing is idempotent per receipt *folder*, not per file.** `basename`
+  carries the export's clock time (`hhmm`), so re-filing a receipt a minute later
+  produces a path that has never existed — a per-file existence check can never
+  see it, and the receipt files itself twice. The identity is the folder
+  (merchant + date + image sha8, from `beanbeaverId`), so `isAlreadyFiled` does
+  one directory listing per receipt and skips it if a `.beancount` is already
+  there. Note `GET /contents/<dir>` returns a JSON **array**, which is why the
+  transport splits into `api` / `apiArray` over a shared `http`.
+
+## Staying in step with beanbeaver-ios
+
+This repo is a deliberately parallel port of `beanbeaver-ios` (same core, same
+UI language). When either side ships, the other usually has a twin to port.
+
+**Find what's missing.** Both repos live under `~/src/bb/`. The last Android
+commit that closed gaps marks the fork point:
+
+```bash
+git -C ~/src/bb/beanbeaver-android log --oneline master | head -1   # fork point
+git -C ~/src/bb/beanbeaver-ios log --oneline --since=<fork date>
+```
+
+Everything iOS committed after that date is the port backlog. iOS commit
+subjects carry the feature name; port them one commit at a time.
+
+**Where each iOS feature lives here.**
+
+| iOS (`BeanBeaver/BeanBeaver/…`) | Android twin |
+|---|---|
+| `ContentView.swift` (home, `ReceiptCard`, `SettingsView`) | `ui/BeanBeaverApp.kt`, `ui/SettingsScreen.kt` |
+| `ReceiptPipeline.swift` / `ReceiptBatch.swift` / `BatchImportView.swift` | `receipt/ReceiptPipeline.kt`, `receipt/ReceiptBatch.kt`, `ui/BatchImportScreen.kt` |
+| `ReceiptCaptureStore.swift` | `receipt/ReceiptCaptureStore.kt` |
+| `SpendStore.swift` / `SpendSummary.swift` | `receipt/SpendStore.kt`, `receipt/SpendSummary.kt` |
+| `SpendingView.swift` / `ReceiptsView.swift` / `CategoryItemsView.swift` | `ui/SpendingScreen.kt`, `ui/ReceiptsScreen.kt`, `ui/CategoryItemsScreen.kt` |
+| `ItemRuleStore.swift` / `ItemRulesView.swift` | `receipt/ItemRuleStore.kt`, `ui/ItemRulesScreen.kt` |
+| `Theme.swift` (`CategoryDisplay`/`PriceFormat`/`ReceiptDateFormat`/`AmountPrivacy`) | `ui/Format.kt`, `ui/AmountPrivacy.kt` (`BudgetPrefs` lives in `receipt/SpendStore.kt`) |
+| `LedgerExport.swift` / `LedgerSettingsView.swift` | `export/LedgerExport.kt` + `github/GitHubSyncViewModel.kt`, `ui/GitHubSettingsScreen.kt` |
+| `GitHubLedger.swift` / `GitHubDeviceFlow.swift` | `github/GitHubLedger.kt` / `github/GitHubApp.kt` |
+| `MoneyManagerExport.swift` | `export/MoneyManagerExport.kt` |
+| `DebugInfoStore.swift` / `DataDump.swift` / `Entitlements.swift` | `debug/…`, `Entitlements.kt` |
+
+**Deliberately not ported** (don't re-investigate): iOS launch-arg harnesses
+(`-dumpSpending`, `-showAmounts`, `-scrollToDebug`, `-showBatchImport`) — Android
+has no process-args convention; use logcat and `scripts/` instead. The
+Files-inbox ledger destination is commented out on iOS too, so Android has no
+twin by design. iOS's CI ORT-cache self-heal is iOS-specific.
+
+**A port is not done until it compiles.** Kotlin has no Swift argument labels,
+and translating `func month(id:from:)` into `fun month(id: String, from records:
+List<...>)` is a syntax error, not a style choice — `for` is a hard keyword on
+top of that. Greps and brace-balance will not catch any of it. Run, on the Mac,
+before opening a PR:
+
+```bash
+./build-android.sh                 # regenerates the git-ignored UniFFI Kotlin
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+cargo check --bin batch_e2e        # CI builds this bin; it has rotted before
+```
+
+The first is not optional: `bbreceiptkit/src/main/kotlin/uniffi/` is generated,
+so nothing in the app compiles until it exists.
