@@ -91,13 +91,14 @@ object GitHubLedger {
 
         // 2. Work out what's actually missing before touching anything, so an
         //    already-filed batch reports itself instead of stranding a branch.
+        //    The unit is the receipt folder, not the file — see [isAlreadyFiled]
+        //    for why a per-file check could never catch a re-export.
         val pending = mutableListOf<List<RepoFile>>()
         filings.forEachIndexed { index, filing ->
             onProgress(
                 if (filings.size == 1) "Checking what's already filed…"
                 else "Checking receipt ${index + 1} of ${filings.size}…")
-            val missing = filing.files.filterNot { fileExists(cfg, repoRoot, it.path, base) }
-            if (missing.isNotEmpty()) pending.add(missing)
+            if (!isAlreadyFiled(cfg, repoRoot, filing.folder, base)) pending.add(filing.files)
         }
         if (pending.isEmpty()) {
             throw GitHubException(
@@ -192,14 +193,32 @@ object GitHubLedger {
         return "Filed a scanned receipt under `${only.folder}/` with BeanBeaver Android."
     }
 
-    /** Whether `path` already exists at `ref`. Content-addressed, so present = identical. */
-    private suspend fun fileExists(cfg: Config, repoRoot: String, path: String, ref: String): Boolean {
-        return try {
-            api(cfg, "GET", "$repoRoot/contents/${encodePath(path)}?ref=$ref")
-            true
+    /**
+     * Whether [folder] already holds a filing for this receipt.
+     *
+     * The identity is the **folder**, not the filename: `basename` carries
+     * [hhmm], so a receipt re-filed a minute later lands on a path that has
+     * never existed and files itself a second time — a per-file check can never
+     * see it. The folder name is content-addressed (merchant + date + the image
+     * sha8 from `beanbeaverId`), so a listing that holds a `.beancount` at all
+     * necessarily holds *this* receipt's.
+     *
+     * One GET per receipt rather than one per file, and a 404 (no such folder)
+     * is the ordinary "not filed yet" answer.
+     */
+    private suspend fun isAlreadyFiled(
+        cfg: Config, repoRoot: String, folder: String, ref: String,
+    ): Boolean {
+        val entries = try {
+            apiArray(cfg, "GET", "$repoRoot/contents/${encodePath(folder)}?ref=$ref")
         } catch (e: HttpStatusException) {
-            if (e.status == 404) false else throw e
+            if (e.status == 404) return false else throw e
         }
+        for (i in 0 until entries.length()) {
+            val name = entries.optJSONObject(i)?.optString("name") ?: continue
+            if (name.endsWith(".beancount")) return true
+        }
+        return false
     }
 
     private fun encodePath(path: String): String =
@@ -212,12 +231,40 @@ object GitHubLedger {
 
     // MARK: - Transport
 
-    /** A non-2xx that callers distinguish (404 = "file not found" for `fileExists`). */
+    /** A non-2xx that callers distinguish (404 = "not there" for [isAlreadyFiled]). */
     private class HttpStatusException(val status: Int, message: String) : Exception(message)
 
+    /** A single object response — every call but a directory listing. */
     private suspend fun api(
         cfg: Config, method: String, pathAndQuery: String, body: JSONObject? = null,
-    ): JSONObject = withContext(Dispatchers.IO) {
+    ): JSONObject {
+        val text = http(cfg, method, pathAndQuery, body)
+        return try {
+            JSONObject(text)
+        } catch (e: Exception) {
+            throw GitHubException("Couldn't read GitHub's response ($pathAndQuery).")
+        }
+    }
+
+    /**
+     * An array response. `GET /contents/<dir>` returns a JSON *array* when the
+     * path is a directory, which [api] can't parse — hence the split rather than
+     * a second copy of the request code.
+     */
+    private suspend fun apiArray(
+        cfg: Config, method: String, pathAndQuery: String,
+    ): JSONArray {
+        val text = http(cfg, method, pathAndQuery, null)
+        return try {
+            JSONArray(text)
+        } catch (e: Exception) {
+            throw GitHubException("Couldn't read GitHub's response ($pathAndQuery).")
+        }
+    }
+
+    private suspend fun http(
+        cfg: Config, method: String, pathAndQuery: String, body: JSONObject?,
+    ): String = withContext(Dispatchers.IO) {
         val conn = URL("https://api.github.com$pathAndQuery").openConnection() as HttpURLConnection
         val code: Int
         val text: String
@@ -246,10 +293,6 @@ object GitHubLedger {
             if (code == 404) throw HttpStatusException(404, message)
             throw GitHubException("GitHub: $message")
         }
-        try {
-            JSONObject(text)
-        } catch (e: Exception) {
-            throw GitHubException("Couldn't read GitHub's response ($pathAndQuery).")
-        }
+        text
     }
 }
