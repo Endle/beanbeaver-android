@@ -94,8 +94,16 @@ jobs:
       # doesn't necessarily ship those exact revisions, and AGP won't fetch them.
       - name: Install the pinned SDK packages
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          # `yes |` is load-bearing: the pinned NDK is a *preview* package, so
+          # sdkmanager stops on the unaccepted android-sdk-preview-license — and
+          # still exits 0, leaving the NDK uninstalled. Without this the job dies
+          # two steps later in build-android.sh with a confusing version
+          # mismatch against whatever NDK the runner image happened to ship.
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-36" "build-tools;36.0.0" "ndk;$BB_NDK"
+          # Fail here, where the cause is legible, rather than downstream.
+          test -d "$ANDROID_HOME/ndk/$BB_NDK" || {
+            echo "::error::sdkmanager did not install ndk;$BB_NDK"; exit 1; }
 
       # Cross-compiles bb-receipt-ffi for aarch64-linux-android and regenerates
       # the UniFFI Kotlin. Both are git-ignored, so nothing in bbreceiptkit/ even
@@ -201,8 +209,16 @@ jobs:
       # it can't resolve one.
       - name: Install the pinned SDK packages
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          # `yes |` is load-bearing: the pinned NDK is a *preview* package, so
+          # sdkmanager stops on the unaccepted android-sdk-preview-license — and
+          # still exits 0, leaving the NDK uninstalled. Without this the job dies
+          # two steps later in build-android.sh with a confusing version
+          # mismatch against whatever NDK the runner image happened to ship.
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-36" "build-tools;36.0.0" "ndk;$BB_NDK"
+          # Fail here, where the cause is legible, rather than downstream.
+          test -d "$ANDROID_HOME/ndk/$BB_NDK" || {
+            echo "::error::sdkmanager did not install ndk;$BB_NDK"; exit 1; }
 
       # Release profile on purpose — it is the whole point of this job, and
       # bbreceiptkit's verifyReleaseNativeProfile would refuse a debug library.
