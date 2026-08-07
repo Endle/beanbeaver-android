@@ -106,9 +106,12 @@ android {
         // Android 16. Play requires new apps/updates to target within one year
         // of the latest release (API 36 required from 2026-08-30).
         targetSdk = 36
-        // Every Play upload needs a unique, higher versionCode.
-        versionCode = 4
-        versionName = "0.4.0"
+        // Every Play upload needs a unique, higher versionCode. 4 is burned:
+        // 0.4.0 reached Play carrying a PROFILE=debug native library (the
+        // 224 MB bundle that verifyReleaseNativeProfile now refuses), so the
+        // fixed build has to go up rather than replace it.
+        versionCode = 5
+        versionName = "0.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")
