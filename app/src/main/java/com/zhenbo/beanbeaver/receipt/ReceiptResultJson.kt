@@ -10,6 +10,8 @@ import uniffi.bb_receipt_ffi.Phase
 import uniffi.bb_receipt_ffi.PhaseSpan
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
+import uniffi.bb_receipt_ffi.ReceiptWarning
+import uniffi.bb_receipt_ffi.ReceiptWarningKind
 import uniffi.bb_receipt_ffi.ScanTimings
 
 /**
@@ -20,9 +22,9 @@ import uniffi.bb_receipt_ffi.ScanTimings
  * UniFFI emits plain data classes, so the scan types aren't serializable and we
  * can't reach into them to add it. Only the fields the batch UI and the ledger
  * export actually read are stored; the debug-only fields (`rawText`, `tenders`,
- * `confidence`, `detections`, `warningAfterItemIndices`, `imageFilename`) are
- * defaulted on decode. Keeping the on-disk shape narrow means an older batch file
- * still loads after the core grows new [ReceiptResult] fields.
+ * `confidence`, `detections`, `imageFilename`) are defaulted on decode. Keeping
+ * the on-disk shape narrow means an older batch file still loads after the core
+ * grows new [ReceiptResult] fields.
  */
 object ReceiptResultJson {
 
@@ -61,7 +63,7 @@ object ReceiptResultJson {
             .put("tax", r.tax ?: JSONObject.NULL)
             .put("subtotal", r.subtotal ?: JSONObject.NULL)
             .put("items", items)
-            .put("warnings", JSONArray(r.warnings))
+            .put("warnings", encodeWarnings(r.warnings))
             .put("beancount", r.beancount)
             .put("beanbeaverId", r.beanbeaverId ?: JSONObject.NULL)
             .put("documentRelpath", r.documentRelpath ?: JSONObject.NULL)
@@ -109,10 +111,9 @@ object ReceiptResultJson {
             tax = o.optNullableString("tax"),
             subtotal = o.optNullableString("subtotal"),
             items = items,
-            warnings = o.getJSONArray("warnings").strings(),
+            warnings = o.getJSONArray("warnings").decodeWarnings(),
             // Not persisted — defaulted so an old batch file still loads and the
             // card/export never depend on them (see the class KDoc).
-            warningAfterItemIndices = emptyList(),
             rawText = "",
             imageFilename = "receipt.jpg",
             tenders = emptyList(),
@@ -158,8 +159,45 @@ private fun JSONObject.decodeTags(): List<ItemTag> =
         }
     }
 
-private fun JSONArray.strings(): List<String> =
-    (0 until length()).map { getString(it) }
+private fun encodeWarnings(warnings: List<ReceiptWarning>): JSONArray {
+    val arr = JSONArray()
+    warnings.forEach { w ->
+        arr.put(
+            JSONObject()
+                .put("kind", w.kind.name)
+                .put("message", w.message)
+                .put("afterItemIndex", w.afterItemIndex),
+        )
+    }
+    return arr
+}
+
+/**
+ * Findings, reading only the v0.8.0 object shape.
+ *
+ * A draft written before then holds bare strings, and a string's kind cannot be
+ * recovered without pattern-matching the English — the exact thing kinds exist
+ * to abolish, and a guess here would mis-rank a stored receipt forever. So a
+ * legacy list is dropped rather than invented. What's lost is the "Heads up"
+ * text on a draft already scanned and already reviewed; what's kept is
+ * everything that matters later — the items, the totals, and the stored
+ * beancount, whose own `; WARN:PARSER` comments still carry those messages
+ * verbatim. (Contrast [decodeTags], where the old shape *is* recoverable.)
+ */
+private fun JSONArray.decodeWarnings(): List<ReceiptWarning> =
+    (0 until length()).mapNotNull { i ->
+        val o = optJSONObject(i) ?: return@mapNotNull null
+        ReceiptWarning(
+            // An unrecognized name means the file was written by a *newer*
+            // build than this one — a downgrade, or a restored backup. Land on
+            // the same fallback an unknown kind gets from `severity`: shown,
+            // quietly.
+            kind = runCatching { ReceiptWarningKind.valueOf(o.getString("kind")) }
+                .getOrDefault(ReceiptWarningKind.POSSIBLE_MISSED_ITEM),
+            message = o.optString("message"),
+            afterItemIndex = o.optInt("afterItemIndex", -1),
+        )
+    }
 
 private fun JSONArray.objects(): List<JSONObject> =
     (0 until length()).map { getJSONObject(it) }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.zhenbo.beanbeaver.export.LedgerFileOptions
 import com.zhenbo.beanbeaver.receipt.ms
 import com.zhenbo.beanbeaver.receipt.totalMs
+import com.zhenbo.beanbeaver.receipt.worthShowing
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.bb_receipt_ffi.Phase
@@ -106,7 +107,12 @@ data class LedgerEntry(
                 .put("subtotal", result.subtotal ?: JSONObject.NULL)
                 .put("tax", result.tax ?: JSONObject.NULL)
                 .put("items", items)
-                .put("warnings", JSONArray(result.warnings))
+                // The sidecar's schema is a list of strings, and stays one.
+                // Filtered to what it has always contained: before kinds
+                // existed, `warnings` held only findings about the numbers, so
+                // exporting the new INFO-level ones would quietly change every
+                // details file.
+                .put("warnings", JSONArray(result.warnings.worthShowing.map { it.message }))
                 .put("timings", timings)
         }
 

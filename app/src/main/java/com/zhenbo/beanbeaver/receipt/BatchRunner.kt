@@ -119,7 +119,9 @@ object BatchRunner {
                                     }
                                 },
                             )
-                            .put("warnings", JSONArray(r.warnings))
+                            // Schema unchanged for compare-e2e.py: the messages,
+                            // and only the kinds this list carried before v0.8.0.
+                            .put("warnings", JSONArray(r.warnings.worthShowing.map { it.message }))
                             .put("wallMs", wallMs)
                             .put(
                                 "timings",

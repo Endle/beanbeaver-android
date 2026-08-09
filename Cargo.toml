@@ -34,8 +34,18 @@ path = "src/bin/batch_e2e.rs"
 # row placement, a subtotal-disagreement warning, tax re-derivation, and a pile
 # of keyword fixes. `git diff v0.7.1 v0.7.11 -- crates/ffi/src/lib.rs` is empty,
 # so no Kotlin call site moves — same photo, better parse.
+#
+# v0.8.0 is a BREAKING FFI change — a warning is now a record, not a string:
+#   ReceiptResult.warnings: [String] -> [ReceiptWarning]   (kind + message +
+#                                      after_item_index, so the client can rank
+#                                      a finding instead of guessing from text)
+#   ReceiptResult.warning_after_item_indices  — deleted, folded into the record
+#   new `ReceiptWarningKind` enum; core reports, the client ranks (see
+#   WarningSeverity.kt). Treat it as open: `else ->` must degrade, never crash.
+# v0.8.1 -> v0.8.4 is parser/rules work on top: Costco TPD discounts, split tax
+# buckets, tax codes kept out of the price column, and tender/total findings.
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.7.11" }
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.8.4" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }

@@ -58,11 +58,23 @@ data class ReceiptDraft(
     val addedAt: Long,
 )
 
-/** Whether the parsed result is worth a second look before it lands in a ledger. iOS `needsAttention`. */
+/**
+ * Whether the parsed result is worth a second look before it lands in a ledger.
+ * Drives the row's badge — never blocks an export, since the user may well be
+ * fine with it. iOS `needsAttention`.
+ *
+ * Two clauses, both about things that are actually wrong: a finding this build
+ * ranks [WarningSeverity.ATTENTION], or a merchant that is only a guess. The
+ * third clause used to be `items.any { it.tags.isEmpty() }` — this app deciding,
+ * on its own, that an unclassified line meant a bad parse. It reported 83 of 124
+ * corpus receipts, including every receipt carrying a *correctly parsed*
+ * discount line, which is not a product and matches no product rule. A badge
+ * that lights on two receipts in three is not a badge, so that judgment now
+ * lives in core as `UNCATEGORIZED_ITEM` and is ranked [WarningSeverity.INFO].
+ */
 val ReceiptResult.needsAttention: Boolean
-    get() = warnings.isNotEmpty() ||
-        merchantMatch.status == MerchantMatchStatus.SUGGESTED ||
-        items.any { it.tags.isEmpty() }
+    get() = warnings.any { it.severity >= WarningSeverity.ATTENTION } ||
+        merchantMatch.status == MerchantMatchStatus.SUGGESTED
 
 /**
  * The photo-library import: a queue of receipts to parse, review, and export in one
