@@ -73,6 +73,3 @@ cargo run --release --bin batch_e2e -- \
 
 When bumping the core tag, update **this** `Cargo.toml` and the iOS root `Cargo.toml` together, then re-run `./build-android.sh` and iOS `./build-xcframework.sh`.
 
-## iOS twin
-
-If checked out beside the iOS app: parent [README.md](../README.md), `BeanBeaver/`, `build-xcframework.sh`.
