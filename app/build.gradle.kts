@@ -132,6 +132,28 @@ android {
         }
     }
 
+    // `full` is what ships to Play; `foss` is the same app with every Google Play
+    // services dependency removed, which is a hard requirement for F-Droid — its
+    // inclusion policy names GMS as not accepted, and asks for a flavour without
+    // it when the app can work in some capacity without it. Here it can: the only
+    // GMS user is the ML Kit document scanner, and the photo-picker capture path
+    // is already the primary way receipts get in.
+    //
+    // Same applicationId on purpose. It is one app on two stores, not two apps,
+    // and F-Droid only requires the id be unique to the project.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("full") {
+            dimension = "distribution"
+            // So a bare `./gradlew :app:assembleDebug`-shaped habit, and the IDE's
+            // default run configuration, keep meaning the Play build.
+            isDefault = true
+        }
+        create("foss") {
+            dimension = "distribution"
+        }
+    }
+
     signingConfigs {
         if (hasUploadKeystore) {
             create("release") {
@@ -206,16 +228,18 @@ tasks.named("preBuild").configure { dependsOn(syncOcrModels, syncLegalDocs) }
  * same length as its input, so a debugsymbols entry exists if and only if
  * stripping genuinely happened. One entry proves both.
  */
-val verifyReleaseBundle by tasks.registering {
-    group = "verification"
-    description = "Fail if the release .aab would earn a Play size / mapping / native-symbol warning."
-}
-
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         val bundle = variant.artifacts.get(SingleArtifact.BUNDLE)
-        verifyReleaseBundle.configure {
-            // Also establishes the dependency on :app:bundleRelease.
+        // One task per release variant, registered inside onVariants rather than
+        // a single shared task configured from it. With the full/foss flavours
+        // this selector matches twice, and two variants configuring one task
+        // would have it read whichever bundle was wired last while claiming to
+        // have checked both.
+        val verify = tasks.register("verify${variant.name.replaceFirstChar(Char::uppercase)}Bundle") {
+            group = "verification"
+            description = "Fail if the ${variant.name} .aab would earn a Play size / mapping / native-symbol warning."
+            // Also establishes the dependency on the bundle task.
             inputs.file(bundle).withPropertyName("bundle")
             doLast {
                 val aab = bundle.get().asFile
@@ -268,10 +292,11 @@ androidComponents {
                 }
             }
         }
-        // AGP registers variant tasks after this script body runs, so bundleRelease
-        // doesn't exist yet; configureEach applies to it once it appears.
+        // AGP registers variant tasks after this script body runs, so
+        // bundleFullRelease doesn't exist yet; configureEach applies to it once
+        // it appears.
         tasks.matching { it.name == "bundle${variant.name.replaceFirstChar(Char::uppercase)}" }
-            .configureEach { finalizedBy(verifyReleaseBundle) }
+            .configureEach { finalizedBy(verify) }
     }
 }
 
@@ -299,7 +324,11 @@ dependencies {
     // On-device document scanner (guided capture + edge-detect/deskew), the
     // Android analog of iOS VisionKit. Delivered via Play services; the capture
     // UI runs in a Play-services activity, so no CAMERA permission is needed here.
-    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
+    //
+    // `full` only — this single line is the entire reason the foss flavour exists.
+    // The foss source set supplies its own rememberDocumentScanLauncher backed by
+    // the system photo picker, so nothing else in the app knows the difference.
+    "fullImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

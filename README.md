@@ -43,8 +43,9 @@ cd android
 ./build-android.sh                 # PROFILE=debug for faster iteration
 
 # APK
-./gradlew :app:assembleDebug
-# → app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleFullDebug
+# → app/build/outputs/apk/full/debug/app-full-debug.apk
+# (:app:assembleFossDebug for the Play-services-free F-Droid build)
 ```
 
 Or open **this** `android/` folder in Android Studio.

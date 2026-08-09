@@ -44,12 +44,16 @@ DEVICE_COUNT=$("$ADB" devices | awk 'NR>1 && $2=="device"' | wc -l | tr -d ' ')
 [ "$DEVICE_COUNT" -ge 1 ] || { echo "no connected device ($ADB devices)"; exit 1; }
 echo "profile: $PROFILE   runs: $RUNS"
 
-# Capitalized variant name for the Gradle task (assembleDebug / assembleRelease).
+# Capitalized names for the Gradle task, which since the full/foss split carries
+# the flavour too: assembleFullDebug / assembleFossRelease. `full` is the default
+# because that is the build whose launch latency ships to Play.
+FLAVOR="${FLAVOR:-full}"
+Flavor="$(printf '%s' "${FLAVOR:0:1}" | tr '[:lower:]' '[:upper:]')${FLAVOR:1}"
 VARIANT="$(printf '%s' "${PROFILE:0:1}" | tr '[:lower:]' '[:upper:]')${PROFILE:1}"
 
-echo "── build & install ($PROFILE) ──"
-( cd "$ROOT" && ./gradlew ":app:assemble$VARIANT" -q )
-APK="$ROOT/app/build/outputs/apk/$PROFILE/app-$PROFILE.apk"
+echo "── build & install ($FLAVOR $PROFILE) ──"
+( cd "$ROOT" && ./gradlew ":app:assemble$Flavor$VARIANT" -q )
+APK="$ROOT/app/build/outputs/apk/$FLAVOR/$PROFILE/app-$FLAVOR-$PROFILE.apk"
 [ -f "$APK" ] || { echo "no APK at $APK"; exit 1; }
 "$ADB" install -r "$APK" >/dev/null
 echo "installed: $APK"

@@ -114,29 +114,29 @@ jobs:
         run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" PROFILE=debug ./build-android.sh
 
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleFullDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: app-full-debug-apk
+          path: app/build/outputs/apk/full/debug/app-full-debug.apk
           if-no-files-found: error
 
       # Context-free JVM logic: the .xlsx writer, amount/price normalization,
       # display formatting. No emulator, no native library.
       - name: JVM unit tests
-        run: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew :app:testFullDebugUnitTest
 
       - name: Android Lint
-        run: ./gradlew :app:lintDebug
+        run: ./gradlew :app:lintFullDebug
 
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lint-results-debug
-          path: app/build/reports/lint-results-debug.*
+          name: lint-results-full-debug
+          path: app/build/reports/lint-results-fullDebug.*
           if-no-files-found: ignore
 
       # The runtime gate. batch_e2e is the host twin of the on-device
@@ -253,7 +253,7 @@ jobs:
           ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" \
             ORT_ANDROID_LIB_LOCATION="$ORT_LIB_DIR" PROFILE=debug ./build-android.sh
 
-      # The actual F-Droid property, asserted rather than assumed.
+      # The actual F-Droid properties, asserted rather than assumed.
       - name: Assert nothing prebuilt reached the Android library
         run: |
           set -euo pipefail
@@ -282,20 +282,42 @@ jobs:
           fi
           echo "OK: ORT statically linked from source, no aarch64 prebuilt fetched"
 
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug
+      # The foss flavour, not the default one: this job is the F-Droid build in
+      # full, and the GMS assertion below is only meaningful against it.
+      - name: Assemble foss debug APK
+        run: ./gradlew :app:assembleFossDebug
+
+      # The other half of the F-Droid contract. GMS is named in the inclusion
+      # policy as not accepted, so a stray `implementation(...)` that reintroduces
+      # it — or a foss source-set file that imports one — has to fail here, where
+      # it is one line to read, rather than in a reviewer's queue weeks later.
+      - name: Assert no Google Play services in the foss APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/foss/debug/app-foss-debug.apk
+          # grep -a: dex is binary. Package paths appear as plain strings in the
+          # dex string pool, so this sees classes R8 kept for any reason.
+          HITS=$(unzip -p "$APK" 'classes*.dex' \
+            | LC_ALL=C grep -a -o 'com/google/android/gms/[a-z]*' | sort -u || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::foss APK references Google Play services:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "OK: no com.google.android.gms references in $APK"
 
       - name: Report what was built
         run: |
           {
-            echo "### FOSS build (ONNX Runtime from source)"
+            echo "### FOSS build (ONNX Runtime from source, no Play services)"
             echo
             echo "| | |"
             echo "|---|---|"
             echo "| ONNX Runtime | built from source, statically linked |"
             echo "| static libs | $(du -ch "$ORT_LIB_DIR"/*.a | tail -1 | cut -f1) |"
             echo "| \`libbb_receipt_ffi.so\` | $(stat -c%s bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so) B |"
-            echo "| APK | $(stat -c%s app/build/outputs/apk/debug/app-debug.apk) B |"
+            echo "| foss APK | $(stat -c%s app/build/outputs/apk/foss/debug/app-foss-debug.apk) B |"
+            echo "| Play services | none |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload FOSS native library
@@ -381,17 +403,25 @@ jobs:
       # what the gates read (dex, native libs, BUNDLE-METADATA). verifyReleaseBundle
       # runs automatically as a finalizer.
       - name: Bundle release
-        run: ./gradlew :app:bundleRelease
+        run: ./gradlew :app:bundleFullRelease
+
+      # R8 over the *foss* source set, which nothing else covers: the FOSS job
+      # builds it debug (unminified) for speed, and this job's bundle is `full`.
+      # A flavour-specific source file that R8 mishandles would otherwise only
+      # surface in an F-Droid build we don't run. APK, not bundle — F-Droid
+      # publishes APKs, and it keeps verifyFossReleaseBundle out of the way.
+      - name: Assemble foss release (R8 over the F-Droid source set)
+        run: ./gradlew :app:assembleFossRelease
 
       - name: Report what shipped
         run: |
-          AAB=app/build/outputs/bundle/release/app-release.aab
+          AAB=app/build/outputs/bundle/fullRelease/app-full-release.aab
           ls -l "$AAB"
           unzip -l "$AAB" | grep -E "\.so$|\.dex$|BUNDLE-METADATA" || true
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-aab
-          path: app/build/outputs/bundle/release/app-release.aab
+          name: app-full-release-aab
+          path: app/build/outputs/bundle/fullRelease/app-full-release.aab
           if-no-files-found: error
