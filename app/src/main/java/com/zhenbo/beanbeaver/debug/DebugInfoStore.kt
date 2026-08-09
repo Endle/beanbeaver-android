@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.zhenbo.beanbeaver.BuildConfig
 import com.zhenbo.beanbeaver.receipt.ms
+import com.zhenbo.beanbeaver.receipt.severity
 import com.zhenbo.beanbeaver.receipt.totalMs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -90,13 +91,22 @@ object DebugInfoStore {
                     .put("tags", JSONArray(it.tags.map { tag -> tag.path })),
             )
         }
+        // Unfiltered on purpose: this is the debug record, so it keeps the INFO
+        // findings the card and the exports leave out. `kind` is dumped
+        // alongside `severity` so a support dump shows both what core reported
+        // and how this build chose to rank it — the two are set in different
+        // repos and drift is exactly what you'd want to see here.
         val warnings = JSONArray()
-        r.warnings.forEachIndexed { i, message ->
-            val idx = r.warningAfterItemIndices.getOrElse(i) { -1 }
+        r.warnings.forEach { w ->
             warnings.put(
                 JSONObject()
-                    .put("message", message)
-                    .put("afterItemIndex", if (idx >= 0) idx else JSONObject.NULL),
+                    .put("kind", w.kind.name)
+                    .put("severity", w.severity.name)
+                    .put("message", w.message)
+                    .put(
+                        "afterItemIndex",
+                        if (w.afterItemIndex >= 0) w.afterItemIndex else JSONObject.NULL,
+                    ),
             )
         }
         val tenders = JSONArray()

@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use bb_receipt_ffi::{DateYmd, OcrSession, Phase, ScanTimings};
+use bb_receipt_ffi::{DateYmd, OcrSession, Phase, ReceiptWarningKind, ScanTimings};
 
 /// Ledger defaults the app passes on every scan (see `ReceiptScanner.kt`);
 /// mirrored here so the host results are graded against the same parse the
@@ -150,7 +150,16 @@ fn success_json(name: &str, r: &bb_receipt_ffi::ReceiptResult, wall_ms: f64) -> 
             )
         })
         .collect();
-    let warnings: Vec<String> = r.warnings.iter().map(|w| json_str(w)).collect();
+    // Schema unchanged for compare-e2e.py: the messages, and only the kinds
+    // this list carried before v0.8.0 gave warnings a kind. The app-side twin
+    // is `WarningSeverity.worthShowing`; spelled out here because this bin is a
+    // host harness with no Kotlin in reach.
+    let warnings: Vec<String> = r
+        .warnings
+        .iter()
+        .filter(|w| worth_showing(w.kind))
+        .map(|w| json_str(&w.message))
+        .collect();
     format!(
         r#"    {{
       "name": {name},
@@ -238,6 +247,21 @@ fn failure_json(name: &str, message: &str) -> String {
         json_str(name),
         json_str(message)
     )
+}
+
+/// Whether a finding belongs in the harness dump — the host twin of the app's
+/// `WarningSeverity >= NOTICE`. Kept exhaustive (no `_` arm) so a new core
+/// variant is a compile error here rather than a silent change to what the E2E
+/// comparison sees.
+fn worth_showing(kind: ReceiptWarningKind) -> bool {
+    match kind {
+        ReceiptWarningKind::TotalMismatch
+        | ReceiptWarningKind::SubtotalMismatch
+        | ReceiptWarningKind::PossibleMissedItem
+        | ReceiptWarningKind::DroppedImplausiblePrice
+        | ReceiptWarningKind::TenderMismatch => true,
+        ReceiptWarningKind::PriceAutoCorrected | ReceiptWarningKind::UncategorizedItem => false,
+    }
 }
 
 fn json_str(s: &str) -> String {

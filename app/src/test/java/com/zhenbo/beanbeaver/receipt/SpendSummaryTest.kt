@@ -53,7 +53,6 @@ class SpendSummaryTest {
         subtotal = null,
         items = items,
         warnings = emptyList(),
-        warningAfterItemIndices = emptyList(),
         rawText = "",
         imageFilename = "receipt.jpg",
         tenders = emptyList(),
