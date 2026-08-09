@@ -28,19 +28,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -88,21 +88,29 @@ import com.zhenbo.beanbeaver.export.MoneyManagerExport
 import com.zhenbo.beanbeaver.export.ShareFile
 import com.zhenbo.beanbeaver.github.GitHubSyncViewModel
 import com.zhenbo.beanbeaver.github.LedgerEntry
-import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.ReceiptBatch
 import com.zhenbo.beanbeaver.receipt.ReceiptPipeline
 import com.zhenbo.beanbeaver.receipt.ScanStatus
 import com.zhenbo.beanbeaver.receipt.SpendRecord
 import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.receipt.SpendSummary
+import com.zhenbo.beanbeaver.receipt.WarningSeverity
+import com.zhenbo.beanbeaver.receipt.exported
+import com.zhenbo.beanbeaver.receipt.highestSeverity
 import com.zhenbo.beanbeaver.receipt.label
+import com.zhenbo.beanbeaver.receipt.lastExportedAt
+import com.zhenbo.beanbeaver.receipt.reachedTargets
+import com.zhenbo.beanbeaver.receipt.severity
 import com.zhenbo.beanbeaver.receipt.totalMs
+import com.zhenbo.beanbeaver.receipt.unexported
+import com.zhenbo.beanbeaver.receipt.worthShowing
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import com.zhenbo.beanbeaver.ui.theme.BbAccentSoft
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
+import uniffi.bb_receipt_ffi.ReceiptWarning
 import uniffi.bb_receipt_ffi.ScanTimings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,6 +133,9 @@ fun BeanBeaverApp(
     val exportRunning by githubVm.exportRunning.collectAsStateWithLifecycle()
     val exportMessage by githubVm.exportMessage.collectAsStateWithLifecycle()
     val exportResult by githubVm.exportResult.collectAsStateWithLifecycle()
+    // Read here rather than inside HomePane so a batch left half-done shows on
+    // the Import button without the home screen owning the batch view model.
+    val batchDrafts by batch.drafts.collectAsStateWithLifecycle()
 
     // Full-screen review of the original photo, opened from the result screen.
     var showOriginalReceipt by rememberSaveable { mutableStateOf(false) }
@@ -165,13 +176,7 @@ fun BeanBeaverApp(
     // Registered before the sub-screen early returns below, not after: an
     // activity-result launcher has to be created on every composition, and the
     // Spending screen's empty state calls it.
-    //
-    // Only the camera path offers to keep a copy: a photo-library import is
-    // already in the library, so saving it back would just duplicate it.
-    val startScan = rememberDocumentScanLauncher(onImage = { bytes ->
-        if (PhotoSaver.isEnabled(context)) PhotoSaver.save(context, bytes)
-        pipeline.scan(bytes)
-    })
+    val startScan = rememberDocumentScanLauncher(onImage = { bytes -> pipeline.scan(bytes) })
 
 
     // Sub-screens as boolean-gated early returns (a small nav "stack"): GitHub and
@@ -333,6 +338,14 @@ fun BeanBeaverApp(
                                 shareMoneyManager(context, listOf(done.result))
                             },
                         )
+                    } else if (status is ScanStatus.Idle) {
+                        // Settings was a full-width pill in a stack of four,
+                        // which made an app preference look like one of the
+                        // app's main actions. The app bar is where it belongs,
+                        // and it costs the home screen no vertical space.
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
                 },
             )
@@ -350,9 +363,9 @@ fun BeanBeaverApp(
                 is ScanStatus.Idle -> HomePane(
                     onScan = startScan,
                     onImportPhotos = { showBatch = true },
+                    batchCount = batchDrafts.size,
                     exportReady = ghConfigured,
                     onExport = { showGitHubSettings = true },
-                    onSettings = { showSettings = true },
                     onOpenSpending = { showSpending = true },
                     onOpenReceipts = { receiptsMonthFilter = null; showReceipts = true },
                 )
@@ -524,13 +537,130 @@ private fun SpendCard(records: List<SpendRecord>, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Receipts, and the state of the backlog — the card that replaced the
+ * "Receipts (12)" and "Export: GitHub" pills.
+ *
+ * Three rows, each earning its place by only appearing when it has something to
+ * say: how many receipts there are, how many are unfiled (with the action to fix
+ * that), and what has already been filed. A pill labelled "Export: GitHub" was
+ * the third row's information wearing a button — it looked like the way to
+ * export and was actually the way to *configure* exporting.
+ *
+ * The status row survives an empty store on purpose. It's the only route left to
+ * the Sync page, and setting up a ledger before scanning anything is a real
+ * first-run order.
+ */
+@Composable
+private fun ReceiptsCard(
+    records: List<SpendRecord>,
+    exportReady: Boolean,
+    onOpenReceipts: () -> Unit,
+    onConfigureExport: () -> Unit,
+) {
+    val backlog = records.unexported.size
+    BbCard {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (records.isNotEmpty()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenReceipts),
+                ) {
+                    Text(
+                        "Receipts",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "${records.size}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            if (backlog > 0) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ExportStatusDot(SpendRecord.ExportStatus.NOT_EXPORTED)
+                    Text(
+                        "$backlog not exported",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Straight to the list, where the pinned bar does the
+                    // export — sending a batch from a card you can't see the
+                    // contents of is a lot to ask of one tap.
+                    BbPillButton(text = "Export", onClick = onOpenReceipts)
+                }
+            }
+
+            // The way to *pick* an exporter has to look like a control. A grey
+            // caption with a chevron reads as a status line, and the one route
+            // to the Sync page went unnoticed. The pill carries the action —
+            // same shape as the backlog row's "Export" — and the text beside it
+            // goes back to being what it always was: a report.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Only once something has actually been filed. Before that this
+                // row is a setup prompt, not a report, and a second amber ring
+                // directly under the backlog's own amber ring reads as a second
+                // backlog.
+                if (records.lastExportedAt != null) {
+                    ExportStatusDot(SpendRecord.ExportStatus.EXPORTED)
+                }
+                Text(
+                    exportStatusLine(records, exportReady),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f).clickable(onClick = onConfigureExport),
+                )
+                BbPillButton(
+                    text = if (exportReady) "Change" else "Set Up",
+                    onClick = onConfigureExport,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What the card's bottom row says. Reports what actually happened when anything
+ * has — including both targets when a receipt went to both — and falls back to
+ * the configured state when nothing has been filed yet, which is the readout the
+ * old "Export:" pill carried.
+ *
+ * Not "Set up where your receipts go": the pill beside it now says that, and an
+ * instruction repeated twice in one row reads as two different things to do.
+ */
+private fun exportStatusLine(records: List<SpendRecord>, exportReady: Boolean): String {
+    val last = records.lastExportedAt
+        ?: return if (exportReady) "Exports to GitHub" else "No export destination yet"
+    val targets = records.reachedTargets
+    val where = if (targets.isEmpty()) "" else " to ${targets.joinToString(" and ")}"
+    return "${records.exported.size} filed$where · last export ${friendlyDay(last)}"
+}
+
 @Composable
 private fun HomePane(
     onScan: () -> Unit,
     onImportPhotos: () -> Unit,
+    /** Drafts waiting in the photo-library batch, surfaced on the Import button. */
+    batchCount: Int,
     exportReady: Boolean,
     onExport: () -> Unit,
-    onSettings: () -> Unit,
     onOpenSpending: () -> Unit,
     onOpenReceipts: () -> Unit,
 ) {
@@ -553,49 +683,39 @@ private fun HomePane(
 
         SpendCard(records = records, onClick = onOpenSpending)
 
-        Column(
+        ReceiptsCard(
+            records = records,
+            exportReady = exportReady,
+            onOpenReceipts = onOpenReceipts,
+            onConfigureExport = onExport,
+        )
+
+        // Scan and Import side by side: same OCR job, two sources, so they
+        // belong in one row rather than stacked as equals with Receipts and
+        // Settings. Scan is the only filled button on the screen now, which is
+        // what it should always have been — four same-size pills made
+        // everything equally important, and "Export: GitHub" was a status
+        // readout wearing a button.
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Button(
-                onClick = onScan,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            Button(onClick = onScan, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.CameraAlt, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Scan a Receipt", fontWeight = FontWeight.SemiBold)
+                Text("Scan", fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(
-                onClick = onImportPhotos,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Import from Photos", fontWeight = FontWeight.SemiBold)
+            OutlinedButton(onClick = onImportPhotos, modifier = Modifier.width(124.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Text, not an icon plus the word: the pair doesn't fit the
+                    // fixed width and wraps "Import" onto two lines. Scan keeps
+                    // its icon — it's the primary action and has the room.
+                    Text("Import", fontWeight = FontWeight.SemiBold)
+                    if (batchCount > 0) {
+                        Text("$batchCount waiting", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
-            OutlinedButton(
-                onClick = onOpenReceipts,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.History, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Receipts" + if (records.isEmpty()) "" else " (${records.size})",
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            OutlinedButton(
-                onClick = onExport,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.CloudUpload, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (exportReady) "Export: GitHub" else "Export: set up GitHub",
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            BbQuietButton(text = "Settings", onClick = onSettings)
         }
 
         Row(
@@ -768,8 +888,9 @@ internal fun ReceiptCard(result: ReceiptResult, wallMs: Double) {
             }
         }
 
-        if (result.warnings.isNotEmpty()) {
-            WarningsBanner(result.warnings)
+        val shown = result.warnings.worthShowing
+        if (shown.isNotEmpty()) {
+            WarningsBanner(shown)
         }
 
         AccountingDetails(result, wallMs)
@@ -913,13 +1034,21 @@ private fun TagRow(item: ReceiptItem) {
     }
 }
 
+/**
+ * The findings worth reading, each in its own rank's color. The banner as a
+ * whole takes the loudest one — a receipt whose only finding is a possible
+ * missed item shouldn't wear the same red as one that cannot balance. INFO
+ * findings never reach here: an uncategorized line is already labelled
+ * "Uncategorized" on its own row.
+ */
 @Composable
-private fun WarningsBanner(warnings: List<String>) {
+private fun WarningsBanner(warnings: List<ReceiptWarning>) {
+    val top = warnings.highestSeverity ?: WarningSeverity.NOTICE
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(BbAccentSoft)
+            .background(top.softTint)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -927,11 +1056,16 @@ private fun WarningsBanner(warnings: List<String>) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Icon(Icons.Default.WarningAmber, contentDescription = null, tint = BbAccent, modifier = Modifier.size(18.dp))
-            Text("Heads up", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = BbAccent)
+            Icon(top.icon, contentDescription = null, tint = top.tint, modifier = Modifier.size(18.dp))
+            Text(
+                if (top == WarningSeverity.ATTENTION) "Heads up" else "Worth a look",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = top.tint,
+            )
         }
         warnings.forEach { w ->
-            Text(w, style = MaterialTheme.typography.labelSmall, color = BbAccent)
+            Text(w.message, style = MaterialTheme.typography.labelSmall, color = w.severity.tint)
         }
     }
 }

@@ -15,10 +15,11 @@ scan → merchant / items / Beancount → export (GitHub PR, or a Money Manager
 `.xlsx` via the share sheet), single or batch. Every scan is also **recorded**,
 so the app is a spend tracker over its own history: Spending (per-month category
 breakdown, drilling into the items behind any total) and Receipts (everything
-scanned, kept until deleted). Settings can browse and extend the classification
-ruleset. Not yet: a Storage Access Framework ledger destination — iOS's
-equivalent Files-inbox backend is written but commented out ("disabled for now"),
-so this side deliberately has no twin until that comes back.
+scanned, kept until deleted, each row carrying an export-status dot and
+filterable by it). Settings can browse and extend the classification ruleset.
+Not yet: a Storage Access Framework ledger destination — iOS's equivalent
+Files-inbox backend is written but commented out ("disabled for now"), so this
+side deliberately has no twin until that comes back.
 
 ## Layout
 
@@ -188,7 +189,7 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.7.11**. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.8.4**. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -197,7 +198,20 @@ wrapper around `BatchRunner`; there is no `androidTest` source set today).
   it silently rotted against the v0.6.x `scan()` arity and `ScanTimings.spans`
   until CI started compiling it. The one-command check is
   `git -C ../beanbeaver-core diff <from> <to> -- crates/ffi/src/lib.rs`; empty
-  output means only the parse changed (v0.7.1 → v0.7.11 was empty).
+  output means only the parse changed (v0.7.1 → v0.7.11 was empty; v0.7.11 →
+  v0.8.4 was not — see below).
+- **A warning is a record, not a string** (core v0.8.0). `ReceiptResult.warnings`
+  is `[ReceiptWarning]` (`kind` + `message` + `afterItemIndex`) and
+  `warning_after_item_indices` is gone. `WarningSeverity.kt` is the single place
+  this app ranks a finding and the only place that may — no screen re-derives a
+  severity from a kind, and nothing anywhere reads `message` to work out what
+  happened. Treat `ReceiptWarningKind` as **open**: kinds are additive, so the
+  `when` has an `else ->` that degrades to "show it quietly". `WarningSeverityTest`
+  fails if a new core variant goes unranked. The two `[String]` schemas that
+  predate kinds — the ledger `.json` sidecar and `batch_e2e`'s dump — stay
+  strings and filter to `worthShowing`, so exporting the new `INFO` findings
+  can't quietly change every details file and every E2E comparison. `batch_e2e`
+  spells the same filter out in Rust (`worth_showing`, exhaustive on purpose).
 - **A field rename reaches further than its call sites.** v0.7.0's
   `ReceiptItem.category -> account` and `tags: [String] -> [ItemTag]` also moved
   three JSON writers (`LedgerEntry` sidecar, `DebugInfoStore`, `BatchRunner`),
@@ -262,6 +276,9 @@ subjects carry the feature name; port them one commit at a time.
 | `SpendingView.swift` / `ReceiptsView.swift` / `CategoryItemsView.swift` | `ui/SpendingScreen.kt`, `ui/ReceiptsScreen.kt`, `ui/CategoryItemsScreen.kt` |
 | `ItemRuleStore.swift` / `ItemRulesView.swift` | `receipt/ItemRuleStore.kt`, `ui/ItemRulesScreen.kt` |
 | `Theme.swift` (`CategoryDisplay`/`PriceFormat`/`ReceiptDateFormat`/`AmountPrivacy`) | `ui/Format.kt`, `ui/AmountPrivacy.kt` (`BudgetPrefs` lives in `receipt/SpendStore.kt`) |
+| `Theme.swift` (`ExportStatusDot`, `bbExported`/`bbUnexported`) | `ui/Components.kt`, `ui/theme/Theme.kt` |
+| `WarningSeverity.swift` | `receipt/WarningSeverity.kt` (ranking, no Compose) + `ui/Format.kt` (its colors/icons) |
+| `PhotoSaver.swift` | `receipt/PhotoSaver.kt` |
 | `LedgerExport.swift` / `LedgerSettingsView.swift` | `export/LedgerExport.kt` + `github/GitHubSyncViewModel.kt`, `ui/GitHubSettingsScreen.kt` |
 | `GitHubLedger.swift` / `GitHubDeviceFlow.swift` | `github/GitHubLedger.kt` / `github/GitHubApp.kt` |
 | `MoneyManagerExport.swift` | `export/MoneyManagerExport.kt` |
@@ -271,7 +288,17 @@ subjects carry the feature name; port them one commit at a time.
 (`-dumpSpending`, `-showAmounts`, `-scrollToDebug`, `-showBatchImport`) — Android
 has no process-args convention; use logcat and `scripts/` instead. The
 Files-inbox ledger destination is commented out on iOS too, so Android has no
-twin by design. iOS's CI ORT-cache self-heal is iOS-specific.
+twin by design. iOS's CI ORT-cache self-heal is iOS-specific. `PhotoSaver`'s
+`notAuthorized` failure has no twin either: a scoped-storage MediaStore insert
+needs no runtime permission at minSdk 34, so there is nothing to refuse.
+
+**Where the two diverge on purpose.** iOS's export target is a picker (GitHub /
+Money Manager / a Files inbox), so its home status line and backlog bar name
+whichever is selected; Android's only configurable ledger destination is GitHub,
+so `exportStatusLine` says "GitHub" outright. `reachedTargets` still reads what
+receipts actually reached — Money Manager gets there via the share sheet — so
+the line can say "filed to GitHub and Money Manager" even though only one of
+them is a setting.
 
 **A port is not done until it compiles.** Kotlin has no Swift argument labels,
 and translating `func month(id:from:)` into `fun month(id: String, from records:

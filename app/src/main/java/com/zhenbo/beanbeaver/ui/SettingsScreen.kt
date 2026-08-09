@@ -56,7 +56,6 @@ import com.zhenbo.beanbeaver.export.LedgerFileOptions
 import com.zhenbo.beanbeaver.export.MoneyManagerExport
 import com.zhenbo.beanbeaver.receipt.BudgetPrefs
 import com.zhenbo.beanbeaver.receipt.LedgerFormatPrefs
-import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.ReceiptCaptureStore
 import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
@@ -91,7 +90,6 @@ fun SettingsScreen(
     var taxAccount by remember { mutableStateOf(LedgerFormatPrefs.taxAccount(context)) }
     var debugEnabled by remember { mutableStateOf(DebugInfoStore.isEnabled(context)) }
     var includeDetailsJson by remember { mutableStateOf(LedgerFileOptions.includeDetailsJson(context)) }
-    var saveToPhotos by remember { mutableStateOf(PhotoSaver.isEnabled(context)) }
     var premiumEnabled by remember { mutableStateOf(Entitlements.isPremium(context)) }
     var moneyManagerAccount by remember { mutableStateOf(MoneyManagerExport.account(context)) }
 
@@ -138,27 +136,6 @@ fun SettingsScreen(
                     else "Not connected",
                     onClick = onOpenGitHub,
                 )
-            }
-
-            SettingsSection(
-                footer = "Keep a copy of each camera scan in your device's photo library, under a " +
-                    "BeanBeaver album. Photos you import were already in the library, so they aren't " +
-                    "saved again.",
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Save a copy to Photos",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = saveToPhotos,
-                        onCheckedChange = {
-                            saveToPhotos = it
-                            PhotoSaver.setEnabled(context, it)
-                        },
-                    )
-                }
             }
 
             SettingsSection(

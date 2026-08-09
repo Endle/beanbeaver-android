@@ -110,8 +110,8 @@ android {
         // 0.4.0 reached Play carrying a PROFILE=debug native library (the
         // 224 MB bundle that verifyReleaseNativeProfile now refuses), so the
         // fixed build has to go up rather than replace it.
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")

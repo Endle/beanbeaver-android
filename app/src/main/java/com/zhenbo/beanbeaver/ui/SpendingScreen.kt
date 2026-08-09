@@ -55,8 +55,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zhenbo.beanbeaver.receipt.BudgetPrefs
+import com.zhenbo.beanbeaver.receipt.SpendRecord
 import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.receipt.SpendSummary
+import com.zhenbo.beanbeaver.receipt.unexported
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import com.zhenbo.beanbeaver.ui.theme.BbAccentSoft
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
@@ -164,6 +166,10 @@ fun SpendingScreen(
             Headline(
                 tracked = maskedAmount(formatCurrency(summary.tracked), hidden),
                 receiptCount = summary.records.size,
+                // This month's unfiled receipts — the same `isExported` split
+                // the Receipts screen's dots and chips draw, scoped to the
+                // month on screen.
+                backlogCount = summary.records.unexported.size,
                 onOpenReceipts = { onOpenReceipts(activeMonthId) },
             )
 
@@ -274,18 +280,25 @@ private fun MonthStepper(
  * place to reach for when you want to see what made up the number.
  */
 @Composable
-private fun Headline(tracked: String, receiptCount: Int, onOpenReceipts: () -> Unit) {
+private fun Headline(
+    tracked: String,
+    receiptCount: Int,
+    backlogCount: Int,
+    onOpenReceipts: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // Label colour, not accent: red on a 44sp money total reads as an
+        // alarm, and "tracked spend" is not an alarm. Accent is reserved for
+        // things you can tap — the link below it, and the target bar.
         Text(
             tracked,
             fontSize = 44.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            color = BbAccent,
         )
         Text(
             "tracked spend",
@@ -300,6 +313,12 @@ private fun Headline(tracked: String, receiptCount: Int, onOpenReceipts: () -> U
                 "$receiptCount receipt${if (receiptCount == 1) "" else "s"}",
                 style = MaterialTheme.typography.labelMedium,
             )
+            if (backlogCount > 0) {
+                Spacer(Modifier.width(6.dp))
+                ExportStatusDot(SpendRecord.ExportStatus.NOT_EXPORTED, size = 7.dp)
+                Spacer(Modifier.width(4.dp))
+                Text("$backlogCount not exported", style = MaterialTheme.typography.labelMedium)
+            }
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
@@ -411,11 +430,15 @@ private fun LeafRow(
                 modifier = Modifier.size(16.dp),
             )
         }
+        // Neutral fill, not accent. Every category on the screen drawn in alarm
+        // red makes the one bar that *is* a judgement — the target bar above,
+        // which can actually go over — indistinguishable from a dozen bars that
+        // are just measurements.
         ProportionBar(
             fraction = if (maxAmount > 0) leaf.amount / maxAmount else 0.0,
             height = 6.dp,
-            track = BbAccentSoft,
-            fill = BbAccent,
+            track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+            fill = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

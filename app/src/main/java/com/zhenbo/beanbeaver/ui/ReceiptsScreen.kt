@@ -3,6 +3,8 @@ package com.zhenbo.beanbeaver.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
@@ -44,20 +48,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import com.zhenbo.beanbeaver.receipt.SpendRecord
 import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.receipt.SpendSummary
 import com.zhenbo.beanbeaver.receipt.needsAttention
+import com.zhenbo.beanbeaver.receipt.unexported
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import com.zhenbo.beanbeaver.ui.theme.cardBackground
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
@@ -86,10 +96,30 @@ fun ReceiptsScreen(
     BackHandler(onBack = onBack)
 
     val allRecords by SpendStore.records.collectAsStateWithLifecycle()
-    val records = remember(allRecords, monthFilter) {
+
+    /**
+     * Everything in scope, before the chips narrow it — what the chip counts are
+     * computed over, so "Not exported 3" always agrees with what tapping it shows.
+     */
+    val scopedRecords = remember(allRecords, monthFilter) {
         if (monthFilter == null) allRecords
         else allRecords.filter { SpendSummary.monthId(it) == monthFilter }
     }
+
+    // Not persisted: the filter is a question you ask on the way to doing
+    // something ("what haven't I filed?"), not a preference — and one that
+    // survived a relaunch would hide receipts from someone who'd forgotten they
+    // set it. `rememberSaveable` still carries it across a rotation.
+    var filter by rememberSaveable { mutableStateOf(ReceiptFilter.ALL) }
+    val records = scopedRecords.filter(filter::matches)
+
+    /**
+     * The backlog the footer bar acts on — scoped to the month being shown, but
+     * deliberately *not* to the chips: the bar means "file everything here that
+     * isn't filed", and that shouldn't change meaning when the view is narrowed
+     * to the exported slice.
+     */
+    val backlog = scopedRecords.unexported
 
     var editing by rememberSaveable { mutableStateOf(false) }
     var selection by rememberSaveable { mutableStateOf(emptySet<String>()) }
@@ -111,7 +141,7 @@ fun ReceiptsScreen(
                     }
                 },
                 actions = {
-                    if (records.isEmpty()) return@TopAppBar
+                    if (scopedRecords.isEmpty()) return@TopAppBar
                     TextButton(onClick = {
                         editing = !editing
                         if (!editing) selection = emptySet()
@@ -143,46 +173,61 @@ fun ReceiptsScreen(
             )
         },
     ) { padding ->
-        if (records.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("No Receipts", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (monthFilter == null) "Scanned receipts show up here."
-                    else "No receipts scanned this month.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-            }
+        if (scopedRecords.isEmpty()) {
+            EmptyState(
+                title = "No Receipts",
+                message = if (monthFilter == null) "Scanned receipts show up here."
+                else "No receipts scanned this month.",
+                modifier = Modifier.fillMaxSize().padding(padding),
+            )
             return@Scaffold
         }
 
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(records, key = { it.id }) { record ->
-                    ReceiptRow(
-                        record = record,
-                        caption = caption(context, record),
-                        editing = editing,
-                        checked = record.id in selection,
-                        onToggle = {
-                            selection = if (record.id in selection) selection - record.id
-                            else selection + record.id
-                        },
-                        onOpen = { onOpenReceipt(record) },
-                        onToggleExcluded = {
-                            SpendStore.setExcluded(context, record.id, !record.isExcluded)
-                        },
-                        onDelete = { SpendStore.remove(context, record.id) },
-                    )
+            // Hidden while selecting: the chips would fight the selection for
+            // what a tap means, and narrowing the list under a live selection
+            // silently changes what "Export 4 Receipts" is about to send.
+            if (!editing) {
+                FilterChips(
+                    filter = filter,
+                    onSelect = { filter = it },
+                    total = scopedRecords.size,
+                    backlogCount = backlog.size,
+                )
+            }
+
+            if (records.isEmpty()) {
+                EmptyState(
+                    title = if (filter == ReceiptFilter.EXPORTED) "Nothing Exported Yet"
+                    else "Nothing to Export",
+                    message = if (filter == ReceiptFilter.EXPORTED)
+                        "Receipts you've filed to your ledger show up here."
+                    else "Every receipt here has reached your ledger.",
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(records, key = { it.id }) { record ->
+                        ReceiptRow(
+                            record = record,
+                            detail = detail(context, record),
+                            editing = editing,
+                            checked = record.id in selection,
+                            onToggle = {
+                                selection = if (record.id in selection) selection - record.id
+                                else selection + record.id
+                            },
+                            onOpen = { onOpenReceipt(record) },
+                            onToggleExcluded = {
+                                SpendStore.setExcluded(context, record.id, !record.isExcluded)
+                            },
+                            onDelete = { SpendStore.remove(context, record.id) },
+                        )
+                    }
                 }
             }
 
@@ -192,6 +237,12 @@ fun ReceiptsScreen(
                     exportReady = exportReady,
                     onDelete = { confirmDeleteSelected = true },
                     onExport = { onExport(selected) },
+                )
+            } else if (backlog.isNotEmpty()) {
+                BacklogFooter(
+                    count = backlog.size,
+                    exportReady = exportReady,
+                    onExport = { onExport(backlog) },
                 )
             }
         }
@@ -222,7 +273,7 @@ fun ReceiptsScreen(
                 // Leave the user somewhere sensible: the toolbar is hidden for an
                 // empty list, so staying in edit mode would take "Done" with it
                 // and strand the screen.
-                if (records.size == n) editing = false
+                if (scopedRecords.size == n) editing = false
             },
             onDismiss = { confirmDeleteSelected = false },
         )
@@ -247,26 +298,161 @@ fun ReceiptsScreen(
 }
 
 /**
- * The row's export/photo/excluded state — most receipts most of the time carrying
- * none of it: an unexported, un-tidied, included receipt says nothing rather than
- * warning about a state that's simply normal.
+ * Which slice of the month the list is showing — the same `isExported` split the
+ * dots draw, as a way to narrow the list.
  */
-private fun caption(context: android.content.Context, record: SpendRecord): String? = buildList {
-    record.exportedTargets.forEach {
-        add(if (it == "Money Manager") "Shared to Money Manager" else "Filed to $it")
+enum class ReceiptFilter(val label: String) {
+    ALL("All"),
+    NOT_EXPORTED("Not exported"),
+    EXPORTED("Exported"),
+    ;
+
+    fun matches(record: SpendRecord): Boolean = when (this) {
+        ALL -> true
+        NOT_EXPORTED -> !record.isExported
+        EXPORTED -> record.isExported
     }
+}
+
+/**
+ * So "what haven't I filed?" is answerable without reading every dot, and the
+ * counts state the backlog even when the answer is "none".
+ */
+@Composable
+private fun FilterChips(
+    filter: ReceiptFilter,
+    onSelect: (ReceiptFilter) -> Unit,
+    total: Int,
+    backlogCount: Int,
+) {
+    // Flat card colour, no tonal elevation: Material tints an elevated surface
+    // with the *primary*, which here is the brand red — a pink banner across
+    // the top of a screen whose whole point is that red means "tap me".
+    Surface(color = cardBackground) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(ReceiptFilter.ALL, filter, total, null, onSelect)
+            FilterChip(
+                ReceiptFilter.NOT_EXPORTED, filter, backlogCount,
+                SpendRecord.ExportStatus.NOT_EXPORTED, onSelect,
+            )
+            FilterChip(
+                ReceiptFilter.EXPORTED, filter, total - backlogCount,
+                SpendRecord.ExportStatus.EXPORTED, onSelect,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(
+    value: ReceiptFilter,
+    current: ReceiptFilter,
+    count: Int,
+    status: SpendRecord.ExportStatus?,
+    onSelect: (ReceiptFilter) -> Unit,
+) {
+    val selected = value == current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(
+                if (selected) BbAccent
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+            )
+            .selectable(selected = selected, onClick = { onSelect(value) })
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        // The selected chip is a solid accent fill, so a coloured dot on it
+        // would be unreadable — and redundant, since the chip is already the
+        // loudest thing in the row.
+        if (status != null && !selected) {
+            ExportStatusDot(status, size = 8.dp)
+        }
+        Text(
+            "${value.label} $count",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * One tap to file everything unfiled. The bar is present whenever there's a
+ * backlog and absent the moment there isn't, so it doubles as the answer to "am
+ * I up to date?" — a screen with no bar is a screen with nothing owing. It used
+ * to take four taps through a menu most people never opened (Select → ⋮ →
+ * Select Unexported → Export).
+ */
+@Composable
+private fun BacklogFooter(count: Int, exportReady: Boolean, onExport: () -> Unit) {
+    Surface(color = cardBackground) {
+        Button(
+            onClick = onExport,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                when {
+                    !exportReady -> "Set Up Export…"
+                    count == 1 -> "Export 1 Receipt"
+                    else -> "Export $count Receipts"
+                },
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(title: String, message: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * Facts about the row that aren't its export status — everything the dot doesn't
+ * already say. Which target a receipt reached moved to the detail screen with
+ * the dot; what's left is the photo and the budget exclusion, which is a fact
+ * about the row rather than a state of its export (see
+ * [SpendRecord.ExportStatus] for why the dot deliberately doesn't carry it).
+ *
+ * Lowercased: these join the date/item-count subtitle now rather than heading
+ * their own line.
+ */
+private fun detail(context: android.content.Context, record: SpendRecord): String? = buildList {
     when (SpendStore.photoState(context, record)) {
         SpendRecord.PhotoState.PRESENT -> Unit
-        SpendRecord.PhotoState.CLEARED -> add("Photo cleared")
-        SpendRecord.PhotoState.UNAVAILABLE -> add("Photo unavailable")
+        SpendRecord.PhotoState.CLEARED -> add("photo cleared")
+        SpendRecord.PhotoState.UNAVAILABLE -> add("photo unavailable")
     }
-    if (record.isExcluded) add("Excluded from spend")
+    if (record.isExcluded) add("excluded from spend")
 }.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 
 @Composable
 private fun ReceiptRow(
     record: SpendRecord,
-    caption: String?,
+    detail: String?,
     editing: Boolean,
     checked: Boolean,
     onToggle: () -> Unit,
@@ -292,6 +478,11 @@ private fun ReceiptRow(
                 Checkbox(checked = checked, onCheckedChange = { onToggle() })
                 Spacer(Modifier.width(4.dp))
             }
+            // Export state as a glyph, not a caption. It used to be a grey line
+            // in the same weight and colour as "Photo cleared", so nothing
+            // distinguished an unfiled receipt at a glance.
+            ExportStatusDot(record.exportStatus)
+            Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -310,22 +501,21 @@ private fun ReceiptRow(
                         )
                     }
                 }
+                // `detail` joins the subtitle rather than sitting on its own
+                // line. Photo state used to be a third line, in the same weight
+                // and colour as the export caption above it — which made a fact
+                // about the row ("photo cleared") look exactly like its status.
+                // The dot is status now; anything on this line is not.
                 val subtitle = buildList {
                     friendlyDate(result.date)?.let { add(it) }
                     val count = result.items.size
                     if (count > 0) add("$count item${if (count == 1) "" else "s"}")
+                    if (!detail.isNullOrEmpty()) add(detail)
                 }.joinToString(" · ")
                 if (subtitle.isNotEmpty()) {
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (caption != null) {
-                    Text(
-                        caption,
-                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -376,7 +566,7 @@ private fun EditFooter(
     onDelete: () -> Unit,
     onExport: () -> Unit,
 ) {
-    Surface(color = cardBackground, tonalElevation = 3.dp) {
+    Surface(color = cardBackground) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -418,8 +608,15 @@ private fun EditFooter(
 @Composable
 fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showPhoto by rememberSaveable { mutableStateOf(false) }
     var confirmClearPhoto by rememberSaveable { mutableStateOf(false) }
+    var photoMenuOpen by remember { mutableStateOf(false) }
+
+    // Outcome of the last "Save to Camera Roll". One piece of state for both
+    // outcomes: the action is invisible either way once the menu closes, so
+    // success needs saying as much as failure does.
+    var saveOutcome by remember { mutableStateOf<SaveOutcome?>(null) }
 
     // Re-read from the store rather than trusting the record handed in, so
     // clearing the photo updates this screen instead of only the list behind it.
@@ -456,6 +653,30 @@ fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
                     IconButton(onClick = { showPhoto = true }, enabled = photoBytes != null) {
                         Icon(Icons.Default.Photo, contentDescription = "Show original receipt")
                     }
+                    Box {
+                        IconButton(onClick = { photoMenuOpen = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(
+                            expanded = photoMenuOpen,
+                            onDismissRequest = { photoMenuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Save to Camera Roll") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Download, contentDescription = null)
+                                },
+                                enabled = photoFile != null,
+                                onClick = {
+                                    photoMenuOpen = false
+                                    val file = photoFile ?: return@DropdownMenuItem
+                                    scope.launch {
+                                        saveOutcome = saveToCameraRoll(context, file)
+                                    }
+                                },
+                            )
+                        }
+                    }
                 },
             )
         },
@@ -469,6 +690,8 @@ fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             ReceiptCard(result = current.result, wallMs = current.wallMs ?: 0.0)
+
+            ExportStatusCard(current)
 
             when (SpendStore.photoState(context, current)) {
                 SpendRecord.PhotoState.PRESENT -> {
@@ -500,7 +723,80 @@ fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
             onDismiss = { confirmClearPhoto = false },
         )
     }
+
+    saveOutcome?.let { outcome ->
+        AlertDialog(
+            onDismissRequest = { saveOutcome = null },
+            title = { Text(outcome.title) },
+            text = { Text(outcome.message) },
+            confirmButton = { TextButton(onClick = { saveOutcome = null }) { Text("OK") } },
+        )
+    }
 }
+
+/**
+ * Where this receipt has got to, in words. This is where "Filed to GitHub" went
+ * when the list row traded it for a dot: the list only has to answer *whether* a
+ * receipt is filed; the answer to *where* is worth a line of its own, and this
+ * is the one screen with room to say a receipt went to both.
+ *
+ * Says "Shared to" for Money Manager and "Filed to" for a ledger, matching
+ * [SpendStore.markShared]'s honesty about the difference: a share sheet is
+ * marked at presentation and may have been cancelled, while a ledger append
+ * either landed or reported an error.
+ */
+@Composable
+private fun ExportStatusCard(record: SpendRecord) {
+    BbCard {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ExportStatusDot(record.exportStatus)
+            Text(
+                when {
+                    record.exportedAt == null -> "Not exported yet"
+                    record.exportedTargets.isEmpty() -> "Exported"
+                    else -> record.exportedTargets.joinToString(" · ", transform = ::targetPhrase)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        record.exportedAt?.let { at ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "First exported ${friendlyTimestamp(at)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun targetPhrase(target: String): String =
+    if (target == "Money Manager") "Shared to Money Manager" else "Filed to $target"
+
+/** What to tell the user after a "Save to Camera Roll" — either way. */
+private data class SaveOutcome(val title: String, val message: String)
+
+/**
+ * Copy this receipt's photo into the user's photo library. The copy lands
+ * outside the app's storage, so it survives Clear Photo and Delete All
+ * Receipts — that's the point of the action, and why the confirmation says so
+ * rather than just "Saved".
+ */
+private suspend fun saveToCameraRoll(context: android.content.Context, file: java.io.File): SaveOutcome =
+    try {
+        PhotoSaver.save(context, file)
+        SaveOutcome(
+            title = "Saved to Camera Roll",
+            message = "A copy of this receipt photo is now in your photo library, under the " +
+                "BeanBeaver album. Deleting the receipt here won't remove it.",
+        )
+    } catch (e: PhotoSaver.Failure) {
+        SaveOutcome(title = "Couldn't Save Photo", message = e.message ?: e.toString())
+    }
 
 @Composable
 private fun PhotoNote(text: String) {

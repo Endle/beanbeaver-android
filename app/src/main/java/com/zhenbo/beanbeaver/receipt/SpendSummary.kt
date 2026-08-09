@@ -61,7 +61,58 @@ data class SpendRecord(
      * of them is a problem — see [SpendStore.photoState].
      */
     enum class PhotoState { PRESENT, CLEARED, UNAVAILABLE }
+
+    /**
+     * What a row's status dot says. One state per receipt, not one per target:
+     * *which* target it reached is detail-screen material ([exportedTargets]),
+     * while the list only ever has to answer "is this filed yet".
+     *
+     * Two states, and [isExcluded] is deliberately not a third. Exclusion is
+     * budget-scoped — it leaves the stored parse and everything an export ships
+     * untouched — so an excluded receipt is still in the backlog and still goes
+     * out with it. A grey "excluded" dot would sit on a row that the export bar
+     * below is about to file, and under a chip counting it as unexported. The
+     * exclusion is said in words in the row's subtitle instead, where it can't
+     * be mistaken for status.
+     */
+    enum class ExportStatus(val label: String) {
+        EXPORTED("Exported"),
+        NOT_EXPORTED("Not exported"),
+    }
+
+    val exportStatus: ExportStatus
+        get() = if (isExported) ExportStatus.EXPORTED else ExportStatus.NOT_EXPORTED
 }
+
+/**
+ * The backlog: everything that hasn't reached a target yet. The one split the
+ * status dots, the Receipts chips and the home card all draw, so they can't
+ * disagree about what "not exported" means.
+ *
+ * These live on the list rather than on [SpendStore] (where iOS puts them)
+ * because every screen here already collects `SpendStore.records` as state — a
+ * computed property reading the store's backing field wouldn't recompose. Being
+ * pure also keeps them JVM-testable, like the rest of this file.
+ */
+val List<SpendRecord>.unexported: List<SpendRecord> get() = filterNot { it.isExported }
+
+val List<SpendRecord>.exported: List<SpendRecord> get() = filter { it.isExported }
+
+/**
+ * When anything last reached a target (epoch millis), or null if nothing ever
+ * has. What the home card's status line dates itself by — "9 filed · last
+ * export Mar 11" answers "am I up to date" in a way a bare count can't.
+ */
+val List<SpendRecord>.lastExportedAt: Long? get() = mapNotNull { it.exportedAt }.maxOrNull()
+
+/**
+ * Every target anything has reached, in first-seen order — "GitHub", "Money
+ * Manager", or both. Read rather than assumed: the app really can file to more
+ * than one place, so the status line names what actually happened instead of
+ * whatever target happens to be selected now.
+ */
+val List<SpendRecord>.reachedTargets: List<String>
+    get() = flatMap { it.exportedTargets }.distinct()
 
 /**
  * Pure arithmetic over [SpendRecord]s — what a month of scanned receipts adds up
