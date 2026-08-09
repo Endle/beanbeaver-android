@@ -49,19 +49,46 @@ ORT_OUT="$ORT_BUILD_DIR/build-$ANDROID_ABI"
 # different version would link a Rust binding against a C++ ABI it was not
 # generated for -- which links cleanly and then misbehaves at runtime, so it is
 # worth the few lines to read the pin rather than hardcode it.
-ORT_VERSION_FALLBACK=1.24.2
+#
+# Everything below writes to stderr, not stdout: this runs inside $(...) and only
+# the version may come back on stdout.
+find_dist_txt() {
+  ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/ort-sys-*/build/download/dist.txt \
+    2>/dev/null | sort -V | tail -1
+}
 find_ort_version() {
   local dist
-  dist="$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/ort-sys-*/build/download/dist.txt 2>/dev/null | sort -V | tail -1)"
+  dist="$(find_dist_txt)"
+  if [ -z "$dist" ]; then
+    # CI hits this every time: this script runs *before* anything has built the
+    # crate, so registry/src is empty and there is no pin to read. `cargo fetch`
+    # extracts into registry/src, which is enough — and notably does not build
+    # anything, so it does not pull a prebuilt ONNX Runtime down in the process.
+    echo ">> fetching crates to read the ort-sys pin" >&2
+    ( cd "$ANDROID_ROOT" && cargo fetch -q >&2 ) || true
+    dist="$(find_dist_txt)"
+  fi
   [ -n "$dist" ] || return 1
   # e.g. "none<TAB>aarch64-linux-android<TAB>https://cdn.pyke.io/0/pyke:ort-rs/ms@1.24.2/…"
   sed -n 's|.*/ms@\([0-9][0-9.]*\)/.*|\1|p' "$dist" | sort -u | head -1
 }
 ORT_VERSION="${ORT_VERSION:-$(find_ort_version || true)}"
 if [ -z "$ORT_VERSION" ]; then
-  ORT_VERSION="$ORT_VERSION_FALLBACK"
-  echo ">> warning: no ort-sys in the cargo registry; assuming ONNX Runtime $ORT_VERSION."
-  echo "   Run a normal ./build-android.sh once so the pin can be read from dist.txt."
+  # Deliberately fatal. Falling back to a hardcoded default is worse than
+  # stopping: it links a Rust binding against a C++ ABI it was not generated
+  # for, which builds clean and misbehaves at runtime — and CI, the one place
+  # meant to catch that drift, would be the quietest about it.
+  cat >&2 <<EOF
+error: could not determine which ONNX Runtime version to build.
+
+  The version is read from ort-sys's build/download/dist.txt (the \`ms@<ver>\`
+  in its download URLs), so it can never drift from the \`ort\` the Rust side
+  links. Neither the cargo registry nor \`cargo fetch\` produced it.
+
+  Fix the cargo setup, or state it explicitly if you know it matches:
+    ORT_VERSION=1.24.2 $0
+EOF
+  exit 1
 fi
 echo ">> ONNX Runtime v$ORT_VERSION ($ANDROID_ABI, API $ANDROID_API)"
 
