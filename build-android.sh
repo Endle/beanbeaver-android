@@ -12,6 +12,18 @@
 #
 # Prerequisites: rustup + cargo, Android NDK (ANDROID_NDK_HOME), ANDROID_API
 # default 34 (app minSdk / Android 14).
+#
+# ORT_ANDROID_LIB_LOCATION=<dir> links ONNX Runtime from a source build instead
+# of letting `ort` download a prebuilt one (see scripts/build-ort-android.sh;
+# required for F-Droid, which never accepts prebuilt shared libraries):
+#
+#   ORT_ANDROID_LIB_LOCATION="$(./scripts/build-ort-android.sh --print-lib-location)" \
+#     ./build-android.sh
+#
+# It deliberately is NOT spelled ORT_LIB_LOCATION, the variable ort-sys actually
+# reads. That one would apply to every cargo invocation below, including the
+# *host* uniffi-bindgen build, which would then try to link Android .a files
+# into a macOS dylib. We pass it inline to the target build only.
 set -euo pipefail
 
 ANDROID_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -192,7 +204,23 @@ find_ort_so() {
 for abi in $ABIS; do
   target="$(abi_to_target "$abi")"
   echo ">> building $CRATE for $target ($PROFILE) [abi=$abi]"
-  cargo build "${cargo_config_args[@]}" "${cargo_flags[@]}" --target "$target"
+  # `env VAR=… cargo` rather than an exported VAR: see the header note on why
+  # ORT_LIB_LOCATION must not survive into the host bindgen build below.
+  ort_env=()
+  if [ -n "${ORT_ANDROID_LIB_LOCATION:-}" ]; then
+    if [ ! -f "$ORT_ANDROID_LIB_LOCATION/libonnxruntime_common.a" ]; then
+      echo "error: no libonnxruntime_common.a in $ORT_ANDROID_LIB_LOCATION" >&2
+      echo "  This must be the CMake binary dir (…/build-$abi/Release), not its parent." >&2
+      exit 1
+    fi
+    echo "   ONNX Runtime from source: $ORT_ANDROID_LIB_LOCATION"
+    ort_env=(env "ORT_LIB_LOCATION=$ORT_ANDROID_LIB_LOCATION")
+  fi
+  # ${a[@]+"${a[@]}"} — expanding an empty array as "${a[@]}" is an unbound
+  # variable under `set -u` in bash 3.2, which is what /usr/bin/env bash still
+  # resolves to on a stock macOS.
+  ${ort_env[@]+"${ort_env[@]}"} \
+    cargo build "${cargo_config_args[@]}" "${cargo_flags[@]}" --target "$target"
 
   so_src=""
   for cand in \

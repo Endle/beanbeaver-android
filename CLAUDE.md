@@ -30,7 +30,7 @@ side deliberately has no twin until that comes back.
 | `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Bins `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness). Pins the `bb-receipt-ffi` tag. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
-| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device). |
+| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
 | `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
 | `.github/workflows/` | `android-build.yml` — the CI below. |
@@ -100,7 +100,7 @@ cp keystore.properties.example keystore.properties   # then fill in real values
 
 ### CI (`.github/workflows/android-build.yml`)
 
-Two `ubuntu-latest` jobs.
+Three `ubuntu-latest` jobs.
 
 **`build`** — the Android twin of iOS's `ios-build.yml`: NDK cross-build of
 `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug ./build-android.sh`) →
@@ -117,6 +117,16 @@ job exists to test what gets uploaded) → `:app:bundleRelease`, which runs R8, 
 strip/symbol extraction, and both gates as a finalizer. Unsigned — signing has no
 bearing on what the gates read. **This is the only CI coverage R8 has**, since
 `:app:assembleDebug` never runs it.
+
+**`fdroid-ort-from-source`** — compiles ONNX Runtime instead of downloading it
+(see the section below) and asserts the result: no `libonnxruntime` `DT_NEEDED`,
+and no `aarch64-linux-android` entry in ort's download cache. Every other job
+happily downloads a prebuilt, so this wiring can rot without any of them noticing.
+It deliberately **does not use `Swatinem/rust-cache`** — the ORT archives are a
+build input living outside `target/`, and caching the two independently is what
+wedged beanbeaver-ios's main branch (ios #57). One cache, archives only, against
+a cold cargo tree. Cold run compiles ORT (slow); warm runs restore ~110 MB of
+`.a` and skip straight to linking.
 
 **There is no emulator job, and adding one is not a matter of writing YAML.**
 The app is arm64-v8a only, and no GitHub-hosted runner can run an arm64 AVD:
@@ -135,6 +145,48 @@ arm64 hardware: locally with
 and, if it ever needs to be automatic, via a self-hosted arm64 Mac runner or a
 device farm (Firebase Test Lab — which would want an instrumented `androidTest`
 wrapper around `BatchRunner`; there is no `androidTest` source set today).
+
+### ONNX Runtime from source (the F-Droid path)
+
+`ort`'s default `download-binaries` fetches a precompiled static ONNX Runtime from
+pyke's CDN. **F-Droid never accepts a prebuilt shared library**, so submission needs
+a build that compiles it. That build exists and is gated by the
+`fdroid-ort-from-source` CI job:
+
+```bash
+ORT_ANDROID_LIB_LOCATION="$(./scripts/build-ort-android.sh --print-lib-location)" \
+  ./build-android.sh
+```
+
+Verified 2026-08-09: it links, and the resulting APK passes the pilot E2E on an
+arm64 emulator with output identical to a prebuilt-ORT build (`COSTCO 2026-03-01
+$72.41`, 7 items). ~3.5 min to compile ORT on a 10-core M-series; 1.4 GB under
+`target/ort/` (git-ignored).
+
+Four things here are non-obvious, and three of them fail *late*:
+
+- **The version is derived, never hardcoded.** `ort-sys/build/download/dist.txt`
+  records the upstream build its binaries came from (`ms@1.24.2`). A different
+  version links cleanly and then misbehaves at runtime.
+- **Point ort-sys at `<build_dir>/Release`, not `<build_dir>`.** `build.py` makes
+  `Release` the CMake binary dir, so `_deps` is *inside* it. Aimed one level up,
+  ort-sys detects `profile="Release"`, finds the ten `libonnxruntime_*.a`, appends
+  `/Release` to every dependency path, and still reports success — the link then
+  fails on unresolved protobuf/onnx symbols.
+- **`re2` must be built explicitly.** ort-sys links it unconditionally, but it is
+  `EXCLUDE_FROM_ALL`, and with `--build_shared_lib` off and unit tests off nothing
+  ORT builds ever links a binary — so CMake has no reason to build it. `build.py`
+  exits 0 and Rust dies much later with `could not find native static library 're2'`.
+- **The variable is `ORT_ANDROID_LIB_LOCATION`, not ort-sys's own
+  `ORT_LIB_LOCATION`.** The latter applies to *every* cargo invocation, including
+  `build-android.sh`'s **host** uniffi-bindgen build, which would then try to link
+  Android `.a` files into a host dylib. It is forwarded to the target build only.
+
+Still open for F-Droid, and not solved by any of the above: the GMS document
+scanner (`app/build.gradle.kts`, one call site in `ui/BeanBeaverApp.kt`), the OCR
+weights being downloaded at build time with no stated licence, and the host
+bindgen build still fetching a *host* prebuilt ORT (not shipped in the APK, but
+F-Droid would run that step too).
 
 ### Gotchas (already cost time — don't relearn)
 

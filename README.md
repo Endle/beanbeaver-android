@@ -21,6 +21,7 @@ android/                         ← this directory is self-contained
     android-e2e.sh               adb batch harness
     compare-e2e.py
     fetch-models.sh
+    build-ort-android.sh         ONNX Runtime from source (FOSS/F-Droid build)
   gradlew …
 ```
 
