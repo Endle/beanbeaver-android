@@ -8,7 +8,9 @@
          Declared explicitly even though play-services-mlkit merges the same
          permission in transitively — relying on that merge means dropping or
          swapping the ML Kit dependency silently breaks every export with a
-         SecurityException, with nothing failing at compile time. -->
+         SecurityException, with nothing failing at compile time. The foss
+         flavour has no ML Kit at all, so this declaration is what keeps GitHub
+         export working there; it is load-bearing, not belt-and-braces. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Camera optional for a later document-scanner screen; photo picker needs none. -->

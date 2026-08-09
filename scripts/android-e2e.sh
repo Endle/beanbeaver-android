@@ -67,15 +67,22 @@ if ! "$ADB" devices | awk 'NR>1 && $2=="device"{ok=1} END{exit !ok}'; then
   exit 1
 fi
 
+# full (Play, GMS document scanner) or foss (F-Droid, no Play services). The scan
+# pipeline this harness exercises is identical in both — the flavours differ only
+# in how a photo is captured, which the batch runner bypasses entirely — so this
+# defaults to `full` and exists so the F-Droid build can be spot-checked too.
+FLAVOR="${FLAVOR:-full}"
+Flavor="$(printf '%s' "${FLAVOR:0:1}" | tr '[:lower:]' '[:upper:]')${FLAVOR:1}"
+
 if [ "${BUILD:-0}" = "1" ]; then
-  echo "── build & install ──"
-  ( cd "$ANDROID_ROOT" && ./gradlew :app:installDebug )
+  echo "── build & install ($FLAVOR) ──"
+  ( cd "$ANDROID_ROOT" && ./gradlew ":app:install${Flavor}Debug" )
 else
-  echo "── install debug APK (BUILD=1 to rebuild) ──"
-  APK="$ANDROID_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+  echo "── install $FLAVOR debug APK (BUILD=1 to rebuild) ──"
+  APK="$ANDROID_ROOT/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
   if [ ! -f "$APK" ]; then
     echo "missing $APK — building…"
-    ( cd "$ANDROID_ROOT" && ./gradlew :app:installDebug )
+    ( cd "$ANDROID_ROOT" && ./gradlew ":app:install${Flavor}Debug" )
   else
     "$ADB" install -r "$APK"
   fi

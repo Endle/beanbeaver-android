@@ -26,12 +26,13 @@ side deliberately has no twin until that comes back.
 | Path | Role |
 |---|---|
 | `app/` | The Compose app (`com.zhenbo.beanbeaver`). Kotlin under `app/src/main/java/…` (a `java/` dir holding `.kt`). `MainActivity`, `ui/BeanBeaverApp.kt` (whole screen), `receipt/` (`ReceiptPipeline` VM, `ModelStore`, `BatchRunner`). |
+| `app/src/{full,foss}/` | The two product flavours — see "Flavours" below. Each holds exactly one file: its own `ui/DocumentScan.kt`. |
 | `bbreceiptkit/` | Local Gradle library wrapping the core. Hand-written `ReceiptScanner.kt`; the UniFFI-generated `uniffi/…` Kotlin and `jniLibs/` are **git-ignored**, produced by `build-android.sh`. |
 | `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Bins `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness). Pins the `bb-receipt-ffi` tag. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
 | `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
-| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
+| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
 | `.github/workflows/` | `android-build.yml` — the CI below. |
 
@@ -62,8 +63,8 @@ printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
 
 ./scripts/fetch-models.sh          # if models/ lacks the 3 .onnx files
 ./build-android.sh                 # PROFILE=debug for faster iteration
-./gradlew :app:assembleDebug       # → app/build/outputs/apk/debug/app-debug.apk
-"$ANDROID_HOME/platform-tools/adb" install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleFullDebug   # → app/build/outputs/apk/full/debug/app-full-debug.apk
+"$ANDROID_HOME/platform-tools/adb" install -r app/build/outputs/apk/full/debug/app-full-debug.apk
 ```
 
 One-time SDK setup (Android Studio SDK Manager / Device Manager): install the **NDK**,
@@ -77,7 +78,7 @@ Play needs a **signed `.aab`**, not an APK:
 ```bash
 cp keystore.properties.example keystore.properties   # then fill in real values
 ./build-android.sh                                    # PROFILE=release (default)
-./gradlew :app:bundleRelease                          # → app/build/outputs/bundle/release/app-release.aab
+./gradlew :app:bundleFullRelease                      # → app/build/outputs/bundle/fullRelease/app-full-release.aab
 ```
 
 - Signing reads `keystore.properties` (git-ignored; see `keystore.properties.example`).
@@ -86,14 +87,14 @@ cp keystore.properties.example keystore.properties   # then fill in real values
 - Every upload needs a unique, higher `versionCode` (`app/build.gradle.kts`).
 - **Two gates run automatically; neither has an escape hatch, by design.**
   `:bbreceiptkit:verifyReleaseNativeProfile` refuses to start a release build whose
-  `jniLibs/` came from `PROFILE=debug`, and `:app:verifyReleaseBundle` finalizes
-  `bundleRelease` and refuses to leave behind an `.aab` that would earn a Play warning
+  `jniLibs/` came from `PROFILE=debug`, and `:app:verifyFullReleaseBundle` finalizes
+  `bundleFullRelease` and refuses to leave behind an `.aab` that would earn a Play warning
   (size, missing native symbols, missing mapping). Each failure message names the
   console text it prevents. A healthy bundle is **~38 MB**.
 - 16 KB page-size support is **mandatory** for Android 15+ targets: `useLegacyPackaging =
   false`, `extractNativeLibs="false"`, JNA ≥5.17, and the `max-page-size=16384` link arg
   in `build-android.sh` — all already wired. Verify with
-  `zipalign -c -P 16 -v 4 app-release.aab` or Android Studio's APK Analyzer.
+  `zipalign -c -P 16 -v 4 app-full-release.aab` or Android Studio's APK Analyzer.
 - Console-side (not in this repo): privacy-policy URL (host `PRIVACY.md`), Data safety
   form, content rating, target-audience + financial-app declarations, and store-listing
   assets (512² icon, 1024×500 feature graphic, ≥2 screenshots).
@@ -104,8 +105,8 @@ Three `ubuntu-latest` jobs.
 
 **`build`** — the Android twin of iOS's `ios-build.yml`: NDK cross-build of
 `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug ./build-android.sh`) →
-`:app:assembleDebug` (APK uploaded as an artifact) → `:app:testDebugUnitTest` →
-`:app:lintDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
+`:app:assembleFullDebug` (APK uploaded as an artifact) → `:app:testFullDebugUnitTest` →
+`:app:lintFullDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
 `compare-e2e.py` grades merchant/date/total/items against `tests/receipts_e2e/`.
 Cargo, the `ort` prebuilt, the ONNX weights and Gradle are all cached; a warm run
 is a few minutes.
@@ -113,10 +114,10 @@ is a few minutes.
 **`release-bundle`** — the path that actually ships, which nothing exercised
 until v0.4.0 reached Play carrying a debug native library. Release-profile
 `./build-android.sh` (deliberately: the gates refuse a debug library, and this
-job exists to test what gets uploaded) → `:app:bundleRelease`, which runs R8, the
+job exists to test what gets uploaded) → `:app:bundleFullRelease`, which runs R8, the
 strip/symbol extraction, and both gates as a finalizer. Unsigned — signing has no
 bearing on what the gates read. **This is the only CI coverage R8 has**, since
-`:app:assembleDebug` never runs it.
+`:app:assembleFullDebug` never runs it.
 
 **`fdroid-ort-from-source`** — compiles ONNX Runtime instead of downloading it
 (see the section below) and asserts the result: no `libonnxruntime` `DT_NEEDED`,
@@ -145,6 +146,35 @@ arm64 hardware: locally with
 and, if it ever needs to be automatic, via a self-hosted arm64 Mac runner or a
 device farm (Firebase Test Lab — which would want an instrumented `androidTest`
 wrapper around `BatchRunner`; there is no `androidTest` source set today).
+
+### Flavours: `full` (Play) and `foss` (F-Droid)
+
+One dimension, `distribution`, so every variant task carries the flavour:
+`assembleFullDebug`, `bundleFullRelease`, `testFullDebugUnitTest`,
+`lintFullDebug`, `verifyFullReleaseBundle`. **`full` is `isDefault`**, so it is
+what the IDE and any half-remembered command land on, and it is what ships to
+Play. Same `applicationId` in both — one app on two stores.
+
+The entire difference is one dependency and one file:
+
+| | `full` | `foss` |
+|---|---|---|
+| `play-services-mlkit-document-scanner` | yes (`fullImplementation`) | **no** |
+| `ui/DocumentScan.kt` | GMS guided capture (edge-detect, deskew, retake) | system photo picker |
+| everything else | identical | identical |
+
+`rememberDocumentScanLauncher` has the same signature in both source sets, so
+`ui/BeanBeaverApp.kt` calls it without knowing the flavour and neither file needs
+an `#ifdef`-shaped conditional. What `foss` loses is *guided capture*, not
+scanning: the user shoots with their own camera app and picks the photo, and the
+bytes reach `ReceiptPipeline.scan` by the same path — which is already the common
+case in `full`, since batch import has always used the picker. Deskew is left to
+receipt-core's own (shipped v0.7.2).
+
+Both flavours are built in CI, and `fdroid-ort-from-source` fails if any
+`com.google.android.gms` string survives into the foss dex. **Build both before
+opening a PR** — a flavour that only exists in one source set is exactly the kind
+of thing that compiles for you and not for the other variant.
 
 ### ONNX Runtime from source (the F-Droid path)
 
@@ -182,11 +212,14 @@ Four things here are non-obvious, and three of them fail *late*:
   `build-android.sh`'s **host** uniffi-bindgen build, which would then try to link
   Android `.a` files into a host dylib. It is forwarded to the target build only.
 
-Still open for F-Droid, and not solved by any of the above: the GMS document
-scanner (`app/build.gradle.kts`, one call site in `ui/BeanBeaverApp.kt`), the OCR
-weights being downloaded at build time with no stated licence, and the host
-bindgen build still fetching a *host* prebuilt ORT (not shipped in the APK, but
-F-Droid would run that step too).
+Still open for F-Droid, and not solved by any of the above: the OCR weights are
+downloaded at build time and their fetch is unpinned (they *are* freely licensed
+— `THIRD_PARTY_NOTICES.md` records PP-OCRv5 as Apache-2.0 — and SHA-256s already
+exist in `beanbeaver/runtime/ocr_models.py`); the host bindgen build still
+fetches a *host* prebuilt ORT (not shipped in the APK, but F-Droid would run that
+step too, and fixing it means splitting the bindgen bin out of the package that
+depends on `bb-receipt-ffi`); and there is still no `LICENSE` file, no git tags,
+and no fastlane metadata.
 
 ### Gotchas (already cost time — don't relearn)
 
@@ -360,7 +393,8 @@ before opening a PR:
 
 ```bash
 ./build-android.sh                 # regenerates the git-ignored UniFFI Kotlin
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleFullDebug :app:assembleFossDebug \
+  :app:testFullDebugUnitTest :app:lintFullDebug
 cargo check --bin batch_e2e        # CI builds this bin; it has rotted before
 ```
 

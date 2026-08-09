@@ -326,5 +326,6 @@ cat <<EOF
    kotlin glue: $PKG/src/main/kotlin/uniffi/
 
 Next:
-  ./gradlew :app:assembleDebug
+  ./gradlew :app:assembleFullDebug    # Play build (GMS document scanner)
+  ./gradlew :app:assembleFossDebug    # F-Droid build (no Play services)
 EOF
