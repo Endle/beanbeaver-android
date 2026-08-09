@@ -2,7 +2,6 @@ package com.zhenbo.beanbeaver.debug
 
 import android.content.Context
 import com.zhenbo.beanbeaver.github.TokenStore
-import com.zhenbo.beanbeaver.receipt.PhotoSaver
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,7 +34,6 @@ data class DataDump(
          */
         private val KNOWN_PREFS: Map<String, List<String>> = mapOf(
             "beanbeaver" to listOf(
-                PhotoSaver.SAVE_TO_PHOTOS_KEY,
                 "includeDetailsJSON",
                 "premiumEnabled",
                 "moneyManagerAccount",
@@ -102,7 +100,7 @@ data class DataDump(
 
     /** Flat text export for sharing off-device, so the dump can be inspected
      *  outside the app too. */
-    fun plainText(context: Context): String = buildString {
+    fun plainText(): String = buildString {
         appendLine("BeanBeaver data dump — ${iso(generatedAt)}")
 
         appendLine()
@@ -122,10 +120,10 @@ data class DataDump(
 
         appendLine()
         appendLine("== Photo library ==")
-        val on = if (PhotoSaver.isEnabled(context)) "ON" else "off"
         appendLine(
-            "BeanBeaver only writes here if \"Save a copy to Photos\" is on; " +
-                "current setting: $on.",
+            "BeanBeaver only writes here when you use \"Save to Camera Roll\" on a receipt, " +
+                "one photo at a time. It can't read the library, so it can't list what it has " +
+                "written — check Photos itself.",
         )
     }
 

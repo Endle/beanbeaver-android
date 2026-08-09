@@ -1,6 +1,6 @@
 # BeanBeaver — Privacy Policy
 
-_Last updated: 2026-07-22_
+_Last updated: 2026-08-09_
 
 BeanBeaver ("the app") turns photos of grocery receipts into itemized,
 Beancount-formatted text **entirely on your device**. This policy explains what
@@ -22,7 +22,14 @@ advertising, and no server component.
 - **Images.** Photos are read from the images you explicitly select via the
   Android photo picker, or captured through Google Play services' document
   scanner. BeanBeaver does not access your photo library beyond the specific
-  images you choose.
+  images you choose — it cannot read what is already in it.
+- **Saving a photo back to your library.** If you use **"Save to Camera Roll"**
+  (Receipts → a receipt → the ⋮ menu), a copy of that one receipt's photo is
+  written to your photo library, under a "BeanBeaver" album. That copy sits
+  outside the app's storage, so none of BeanBeaver's own delete controls —
+  clearing a photo, deleting a receipt, Delete All Receipts — can reach it;
+  removing it means deleting it from your photo library yourself. Nothing is
+  written to your library unless you ask for it this way.
 - **Storage.** Results stay in the app unless you explicitly export or share
   them using your device's own share feature, at which point they are handled by
   the destination you pick.
@@ -38,6 +45,10 @@ by [Google's Privacy Policy](https://policies.google.com/privacy).
 
 - **Camera** _(optional)_: only if you use the document scanner to capture a
   receipt. Photos picked from your library need no camera access.
+
+"Save to Camera Roll" needs no permission at all: BeanBeaver adds the photo
+through Android's own media store, which lets an app create entries it owns
+without granting it any view of the rest of your library.
 
 BeanBeaver requests no Internet, location, contacts, or account permissions.
 

@@ -1,7 +1,18 @@
 package com.zhenbo.beanbeaver.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.zhenbo.beanbeaver.receipt.WarningSeverity
+import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import uniffi.bb_receipt_ffi.ItemTag
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -51,6 +62,18 @@ fun friendlyDate(raw: String?): String? {
 }
 
 /**
+ * An epoch-millis stamp as a person reads a day ("Mar 11, 2026"), and the same
+ * with the time of day. Used for export stamps, where the date is the point and
+ * the clock time only matters on the one screen showing a single receipt —
+ * iOS's `.abbreviated` / `.abbreviated` + `.shortened` pair.
+ */
+fun friendlyDay(millis: Long): String =
+    SimpleDateFormat("MMM d, yyyy", Locale.US).format(Date(millis))
+
+fun friendlyTimestamp(millis: Long): String =
+    SimpleDateFormat("MMM d, yyyy 'at' h:mm a", Locale.US).format(Date(millis))
+
+/**
  * How an item's classifier tags render: the classifier emits tags broad→specific
  * (e.g. `grocery`, `grocery/meat`, `grocery/meat/chicken`), so the last is the
  * most specific — we lead with it as an accent chip and keep the rest as quiet
@@ -85,6 +108,32 @@ fun formatBytes(bytes: Long): String {
     return if (value >= 100) "%.0f %s".format(value, units[unit])
     else "%.1f %s".format(value, units[unit])
 }
+
+/**
+ * How a [WarningSeverity] looks. Attached here rather than at each call site so
+ * "orange means notice" can't drift between the banner and any future list —
+ * the ranking itself stays in [WarningSeverity], which knows nothing of Compose.
+ *
+ * `tertiary` is the theme's legible orange: iOS's `.orange` (#FF9500) is too
+ * pale to read as text on white, so light and dark each get their own.
+ */
+val WarningSeverity.tint: Color
+    @Composable get() = when (this) {
+        WarningSeverity.ATTENTION -> BbAccent
+        WarningSeverity.NOTICE -> MaterialTheme.colorScheme.tertiary
+        WarningSeverity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+/** The same color at banner strength — a wash behind the text, not the text. */
+val WarningSeverity.softTint: Color
+    @Composable get() = tint.copy(alpha = 0.12f)
+
+val WarningSeverity.icon: ImageVector
+    get() = when (this) {
+        WarningSeverity.ATTENTION -> Icons.Default.ErrorOutline
+        WarningSeverity.NOTICE -> Icons.Default.WarningAmber
+        WarningSeverity.INFO -> Icons.Default.Info
+    }
 
 /** "COSTCO WHOLESALE" → "Costco Wholesale" — iOS renders merchant/item names capitalized. */
 fun titleCase(text: String): String =

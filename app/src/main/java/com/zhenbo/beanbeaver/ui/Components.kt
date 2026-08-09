@@ -1,12 +1,15 @@
 package com.zhenbo.beanbeaver.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -17,9 +20,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.zhenbo.beanbeaver.receipt.SpendRecord
 import com.zhenbo.beanbeaver.ui.theme.BbAccentSoft
+import com.zhenbo.beanbeaver.ui.theme.bbExported
+import com.zhenbo.beanbeaver.ui.theme.bbUnexported
 import com.zhenbo.beanbeaver.ui.theme.cardBackground
 
 /**
@@ -98,6 +108,60 @@ fun SettingsSection(
             )
         }
     }
+}
+
+/**
+ * One receipt's export state as a single glyph — filled green for filed, a
+ * hollow amber ring for a backlog. Kotlin twin of iOS `ExportStatusDot`.
+ *
+ * A ring rather than a second fill for [SpendRecord.ExportStatus.NOT_EXPORTED]:
+ * the two states have to be tellable apart at 9dp *and* by someone who can't
+ * separate the hues, so they differ in shape first and colour second.
+ */
+@Composable
+fun ExportStatusDot(
+    status: SpendRecord.ExportStatus,
+    size: Dp = 9.dp,
+    modifier: Modifier = Modifier,
+) {
+    val exported = status == SpendRecord.ExportStatus.EXPORTED
+    val color = if (exported) bbExported else bbUnexported
+    Canvas(
+        modifier = modifier
+            .size(size)
+            .semantics { contentDescription = status.label },
+    ) {
+        if (exported) {
+            drawCircle(color)
+        } else {
+            // Inset by half the stroke so the ring's outer edge lands on the
+            // same circle the filled dot draws — otherwise the two states are
+            // visibly different sizes side by side in the chips.
+            val stroke = 1.5.dp.toPx()
+            drawCircle(color, radius = size.toPx() / 2 - stroke / 2, style = Stroke(stroke))
+        }
+    }
+}
+
+/**
+ * A quiet accent pill: the shape this app uses for a secondary action sitting
+ * inside a card row ("Export", "Set Up"/"Change"). Soft-red fill with accent
+ * text, so it reads as tappable without competing with the screen's one filled
+ * button.
+ */
+@Composable
+fun BbPillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(BbAccentSoft)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    )
 }
 
 /**

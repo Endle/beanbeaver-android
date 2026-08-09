@@ -61,7 +61,7 @@ fun DataDumpScreen(onBack: () -> Unit) {
                         val clipboard =
                             context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(
-                            ClipData.newPlainText("BeanBeaver data dump", dump.plainText(context)),
+                            ClipData.newPlainText("BeanBeaver data dump", dump.plainText()),
                         )
                     }) {
                         Icon(Icons.Default.ContentCopy, contentDescription = "Copy dump")

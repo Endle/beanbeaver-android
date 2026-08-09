@@ -19,6 +19,22 @@ val BbAccent = Color(0xFFCC1C26)
 val BbAccentSoft = BbAccent.copy(alpha = 0.12f)
 
 /**
+ * "This receipt reached your ledger." Deliberately *not* [BbAccent]: red is the
+ * tap-me colour (see `BbQuietButton`), and export state is a readout, never an
+ * action. The exact values iOS uses, lifted for dark so both stay legible.
+ */
+val bbExported: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF4DC770) else Color(0xFF248A3D)
+
+/**
+ * "Not filed yet." Amber rather than red because a backlog is a *pending*
+ * state, not an error — nothing is wrong with a receipt you scanned two minutes
+ * ago.
+ */
+val bbUnexported: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFE89952) else Color(0xFFC7692A)
+
+/**
  * iOS "grouped" surfaces, ported so cards sit on a slightly recessed page the
  * way they do on iPhone: [groupedBackground] is the page (systemGroupedBackground),
  * [cardBackground] is the raised card (secondarySystemGroupedBackground).
