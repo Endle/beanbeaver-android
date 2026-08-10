@@ -28,10 +28,11 @@ side deliberately has no twin until that comes back.
 | `app/` | The Compose app (`com.zhenbo.beanbeaver`). Kotlin under `app/src/main/java/…` (a `java/` dir holding `.kt`). `MainActivity`, `ui/BeanBeaverApp.kt` (whole screen), `receipt/` (`ReceiptPipeline` VM, `ModelStore`, `BatchRunner`). |
 | `app/src/{full,foss}/` | The two product flavours — see "Flavours" below. Each holds exactly one file: its own `ui/DocumentScan.kt`. |
 | `bbreceiptkit/` | Local Gradle library wrapping the core. Hand-written `ReceiptScanner.kt`; the UniFFI-generated `uniffi/…` Kotlin and `jniLibs/` are **git-ignored**, produced by `build-android.sh`. |
-| `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Bins `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness). Pins the `bb-receipt-ffi` tag. |
+| `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Pins the `bb-receipt-ffi` tag and hosts two bins — `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness) — whose **sources live in `shared/`**, compiled here via `[[bin]] path`. `src/lib.rs` is an empty lib target. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
-| `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
-| `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
+| `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./shared/scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
+| `scripts/` | `android-e2e.sh` (adb batch harness), `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
+| `shared/` | **Git submodule** — [`beanbeaver-mobile-util`](https://github.com/Endle/beanbeaver-mobile-util), the assets iOS and Android genuinely share: `scripts/compare-e2e.py`, `scripts/fetch-models.sh`, `src/bin/uniffi-bindgen.rs`, `src/bin/batch_e2e.rs`. See "The `shared/` submodule" below. |
 | `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
 | `.github/workflows/` | `android-build.yml` (the CI below) and `fdroid.yml` (the F-Droid build, separate because it is slow and narrowly triggered). |
@@ -42,6 +43,32 @@ side deliberately has no twin until that comes back.
 `THIRD_PARTY_NOTICES.md` by the `syncLegalDocs` Gradle task, so the file a reader
 sees in the repo and the one the app shows can't drift — edit the root copies.
 Regenerate the notices' crate inventory whenever the core tag moves.
+
+## The `shared/` submodule
+
+Four files used to exist twice (or once, and should have existed twice). They now
+live in [`beanbeaver-mobile-util`](https://github.com/Endle/beanbeaver-mobile-util)
+and both phone apps consume them as a submodule at `shared/`.
+
+**Clone with `--recurse-submodules`**, or run `git submodule update --init`. An
+empty `shared/` is not a soft failure: the `[[bin]]` paths in `Cargo.toml` point
+into it, so cargo dies on a missing manifest path and `build-android.sh` never
+reaches codegen. Both CI workflows check out with `submodules: true`.
+
+The two `.rs` files are **source assets compiled into this package**, not a crate
+dependency — deliberately. `batch_e2e.rs` imports `OcrSession`, `Phase`,
+`ScanTimings` and `ReceiptWarningKind` from `bb-receipt-ffi`, so it builds against
+*this* repo's pinned core tag, and iOS can sit on a different one. That is exactly
+the drift a cargo git-dep could not absorb. Same reasoning for `uniffi-bindgen.rs`
+and the `uniffi` 0.28 pin.
+
+So a breaking core FFI bump can require a change in `beanbeaver-mobile-util`. The
+order is: fix it there, push, then move this repo's pointer:
+
+```bash
+cd shared && git pull origin main && cd ..
+git add shared && git commit -m "chore(shared): bump beanbeaver-mobile-util"
+```
 
 ## Build & run on macOS (Apple Silicon)
 
@@ -61,7 +88,7 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.15729638"
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"  # for ./gradlew
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
 
-./scripts/fetch-models.sh          # if models/ lacks the 3 .onnx files
+./shared/scripts/fetch-models.sh   # if models/ lacks the 3 .onnx files
 ./build-android.sh                 # PROFILE=debug for faster iteration
 ./gradlew :app:assembleFullDebug   # → app/build/outputs/apk/full/debug/app-full-debug.apk
 "$ANDROID_HOME/platform-tools/adb" install -r app/build/outputs/apk/full/debug/app-full-debug.apk
@@ -107,7 +134,8 @@ Two `ubuntu-latest` jobs here, plus a third in its own file (below).
 `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug ./build-android.sh`) →
 `:app:assembleFullDebug` (APK uploaded as an artifact) → `:app:testFullDebugUnitTest` →
 `:app:lintFullDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
-`compare-e2e.py` grades merchant/date/total/items against `tests/receipts_e2e/`.
+`shared/scripts/compare-e2e.py` grades merchant/date/total/items against
+`tests/receipts_e2e/`.
 Cargo, the `ort` prebuilt, the ONNX weights and Gradle are all cached; a warm run
 is a few minutes.
 
@@ -296,7 +324,7 @@ and no fastlane metadata.
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
   change means adapting `ReceiptScanner.kt` (as v0.5.0's `currency` +
-  `tax_account` did) **and `src/bin/batch_e2e.rs`** — nothing built that bin, so
+  `tax_account` did) **and `shared/src/bin/batch_e2e.rs`** — nothing built that bin, so
   it silently rotted against the v0.6.x `scan()` arity and `ScanTimings.spans`
   until CI started compiling it. The one-command check is
   `git -C ../beanbeaver-core diff <from> <to> -- crates/ffi/src/lib.rs`; empty
@@ -323,7 +351,7 @@ and no fastlane metadata.
   when the app updates. Pre-0.7.0 `category` is deliberately *not* read into
   `account` — it held a classifier key (`grocery_dairy`), not an account.
 - The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
-  is hosted by the local `uniffi-bindgen` bin (see `src/bin/uniffi-bindgen.rs`).
+  is hosted by the local `uniffi-bindgen` bin (see `shared/src/bin/uniffi-bindgen.rs`).
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.
 - **`SpendSummary.kt` must stay free of Android imports** — no `Context`, no
   preferences, no Compose. That is what lets its arithmetic be pinned by JVM

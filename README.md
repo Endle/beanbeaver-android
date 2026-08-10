@@ -15,15 +15,21 @@ android/                         ← this directory is self-contained
   app/                           Compose app
   bbreceiptkit/                  UniFFI Kotlin + jniLibs
   build-android.sh               Rust → .so + Kotlin glue
-  Cargo.toml                     FFI bindgen + batch_e2e
+  Cargo.toml                     FFI bindgen + batch_e2e ([[bin]] → shared/)
   models/                        PP-OCRv5 .onnx (or ../models fallback)
   scripts/
     android-e2e.sh               adb batch harness
-    compare-e2e.py
-    fetch-models.sh
     build-ort-android.sh         ONNX Runtime from source (FOSS/F-Droid build)
+  shared/                        submodule: Endle/beanbeaver-mobile-util
+    scripts/compare-e2e.py       ← shared with beanbeaver-ios
+    scripts/fetch-models.sh
+    src/bin/batch_e2e.rs
+    src/bin/uniffi-bindgen.rs
   gradlew …
 ```
+
+Clone with `--recurse-submodules` (or run `git submodule update --init`);
+without `shared/` the cargo build fails on a missing bin path.
 
 Generated (git-ignored): `bbreceiptkit/.../jniLibs/`, `uniffi/` Kotlin, `app/.../assets/models/`, `target/`.
 
@@ -37,7 +43,7 @@ auto-finds the NDK under `$ANDROID_HOME/ndk/`.
 cd android
 
 # Models (skip if ../models already has the three .onnx files)
-./scripts/fetch-models.sh
+./shared/scripts/fetch-models.sh
 
 # Native + UniFFI
 ./build-android.sh                 # PROFILE=debug for faster iteration
