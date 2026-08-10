@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build bb-receipt-ffi for Android and install into bbreceiptkit/ (this tree):
-#   - jniLibs/<abi>/libbb_receipt_ffi.so
+#   - jniLibs/<abi>/libbb_mobile_ffi.so
 #   - jniLibs/<abi>/libc++_shared.so
 #   - optionally jniLibs/<abi>/libonnxruntime.so
 #   - src/main/kotlin/uniffi/…  (UniFFI Kotlin glue)

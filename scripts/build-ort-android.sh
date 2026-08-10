@@ -94,7 +94,7 @@ echo ">> ONNX Runtime v$ORT_VERSION ($ANDROID_ABI, API $ANDROID_API)"
 
 # --- the NDK, agreeing with build-android.sh -------------------------------
 #
-# ORT's objects end up inside libbb_receipt_ffi.so, so they have to be compiled
+# ORT's objects end up inside libbb_mobile_ffi.so, so they have to be compiled
 # with the same NDK as the Rust side. The mismatch check matters most on CI: the
 # runner images preset ANDROID_NDK_HOME to whatever NDK they happen to ship, and
 # silently building ORT with that one is exactly the kind of thing that only
@@ -118,7 +118,7 @@ error: NDK version mismatch.
   using:  $NDK
   pinned: $NDK_VERSION  (bb.ndkVersion in gradle.properties)
 
-ONNX Runtime is compiled into libbb_receipt_ffi.so, so it must use the NDK the
+ONNX Runtime is compiled into libbb_mobile_ffi.so, so it must use the NDK the
 Rust side uses. Either install the pinned one, or unset ANDROID_NDK_HOME so
 auto-discovery picks it up.
 EOF

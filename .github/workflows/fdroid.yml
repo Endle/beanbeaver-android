@@ -137,7 +137,7 @@ jobs:
       - name: Assert nothing prebuilt reached the Android library
         run: |
           set -euo pipefail
-          SO=bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so
+          SO=bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_mobile_ffi.so
           READELF="$ANDROID_HOME/ndk/$BB_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 
           echo "== DT_NEEDED =="
@@ -195,7 +195,7 @@ jobs:
             echo "|---|---|"
             echo "| ONNX Runtime | built from source, statically linked |"
             echo "| static libs | $(du -ch "$ORT_LIB_DIR"/*.a | tail -1 | cut -f1) |"
-            echo "| \`libbb_receipt_ffi.so\` | $(stat -c%s bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so) B |"
+            echo "| \`libbb_mobile_ffi.so\` | $(stat -c%s bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_mobile_ffi.so) B |"
             echo "| foss APK | $(stat -c%s app/build/outputs/apk/foss/debug/app-foss-debug.apk) B |"
             echo "| Play services | none |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -203,6 +203,6 @@ jobs:
       - name: Upload FOSS native library
         uses: actions/upload-artifact@v4
         with:
-          name: libbb_receipt_ffi-foss-arm64-v8a
-          path: bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so
+          name: libbb_mobile_ffi-foss-arm64-v8a
+          path: bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_mobile_ffi.so
           if-no-files-found: error
