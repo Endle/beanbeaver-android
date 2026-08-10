@@ -2,9 +2,11 @@
 
 Standalone Android client for the shared Rust receipt core: photo → PP-OCRv5 OCR +
 parse + categorize → **Beancount**, entirely on-device via a UniFFI→Kotlin seam.
-The **Android twin of `beanbeaver-ios`** — it consumes `bb-receipt-ffi` from
-[`beanbeaver-core`](https://github.com/Endle/beanbeaver-core), pinned by a **git tag**
-in `Cargo.toml` (same model as iOS). Compose UI + `ReceiptPipeline` ViewModel.
+The **Android twin of `beanbeaver-ios`** — it links **one** Rust library,
+`bb-mobile-ffi` from [`beanbeaver-mobile-util`](https://github.com/Endle/beanbeaver-mobile-util),
+which carries the parse core (`bb-receipt-ffi` from
+[`beanbeaver-core`](https://github.com/Endle/beanbeaver-core)) inside it. Both are
+pinned by **git tag** in `Cargo.toml` (same model as iOS). Compose UI + `ReceiptPipeline` ViewModel.
 
 The umbrella `~/src/bb/CLAUDE.md` owns the cross-repo **license firewall** and
 core-tag pinning rules (this repo is newer and not listed there yet — treat it as the
@@ -28,12 +30,12 @@ side deliberately has no twin until that comes back.
 | `app/` | The Compose app (`com.zhenbo.beanbeaver`). Kotlin under `app/src/main/java/…` (a `java/` dir holding `.kt`). `MainActivity`, `ui/BeanBeaverApp.kt` (whole screen), `receipt/` (`ReceiptPipeline` VM, `ModelStore`, `BatchRunner`). |
 | `app/src/{full,foss}/` | The two product flavours — see "Flavours" below. Each holds exactly one file: its own `ui/DocumentScan.kt`. |
 | `bbreceiptkit/` | Local Gradle library wrapping the core. Hand-written `ReceiptScanner.kt`; the UniFFI-generated `uniffi/…` Kotlin and `jniLibs/` are **git-ignored**, produced by `build-android.sh`. |
-| `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Pins the `bb-receipt-ffi` tag and hosts two bins — `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness) — whose **sources live in `shared/`**, compiled here via `[[bin]] path`. `src/lib.rs` is an empty lib target. |
+| `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Pins the **`bb-mobile-ffi`** tag (the library that ships) *and* the `bb-receipt-ffi` tag (for `batch_e2e.rs`) — **the two must agree on the core version**. Hosts two bins — `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness) — whose **sources live in `shared/`**, compiled here via `[[bin]] path`. `src/lib.rs` is an empty lib target. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./shared/scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
 | `scripts/` | `android-e2e.sh` (adb batch harness), `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
 | `shared/` | **Git submodule** — [`beanbeaver-mobile-util`](https://github.com/Endle/beanbeaver-mobile-util), the assets iOS and Android genuinely share: `scripts/compare-e2e.py`, `scripts/fetch-models.sh`, `src/bin/uniffi-bindgen.rs`, `src/bin/batch_e2e.rs`. See "The `shared/` submodule" below. |
-| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
+| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s **projection / re-attachment** (the arithmetic itself moved to Rust — see below). |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
 | `.github/workflows/` | `android-build.yml` (the CI below) and `fdroid.yml` (the F-Droid build, separate because it is slow and narrowly triggered). |
 
@@ -96,7 +98,7 @@ printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
 
 One-time SDK setup (Android Studio SDK Manager / Device Manager): install the **NDK**,
 an **arm64-v8a** system image, and create an AVD. `onnxruntime` is **statically linked**
-into `libbb_receipt_ffi.so` — there's no separate `libonnxruntime.so`.
+into `libbb_mobile_ffi.so` — there's no separate `libonnxruntime.so`.
 
 ### Release build for Play (AAB)
 
@@ -278,7 +280,7 @@ and no fastlane metadata.
   of truth: both modules read it, `build-android.sh` prefers it and hard-fails on a
   mismatch, and CI installs it. **Never let the NDK that compiles the `.so` differ from
   the one AGP strips it with.** Symptom if it regresses: the packaged
-  `libbb_receipt_ffi.so` is ~37 MB instead of ~25 MB, `libc++_shared.so` is 9.5 MB
+  `libbb_mobile_ffi.so` is ~37 MB instead of ~25 MB, `libc++_shared.so` is 9.5 MB
   instead of 1.4 MB, and `BUNDLE-METADATA/…/debugsymbols/` is absent.
 - **Stripping rewrites the ELF, so re-check 16 KB alignment after any change to it.**
   `llvm-objcopy --strip-unneeded` rebuilds section headers and file layout. It *does*
@@ -286,7 +288,7 @@ and no fastlane metadata.
   `zipalign -c -P 16 -v 4` passes), but alignment is a hard Play requirement, so verify
   both layers rather than assuming:
   ```bash
-  unzip -p app-release.apk lib/arm64-v8a/libbb_receipt_ffi.so > /tmp/s.so
+  unzip -p app-release.apk lib/arm64-v8a/libbb_mobile_ffi.so > /tmp/s.so
   "$ANDROID_HOME/ndk/<pin>/toolchains/llvm/prebuilt/*/bin/llvm-readelf" -l /tmp/s.so | grep LOAD
   "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 app-release.apk
   ```
@@ -317,9 +319,28 @@ and no fastlane metadata.
   warns at launch after a clean rebuild, re-check those four. Older AndroidX bumps may
   also be needed as the Compose BOM advances.
 
+## Two pinned tags, and why the pair matters
+
+`Cargo.toml` pins **two** git dependencies, and they are not independent:
+
+| Dep | Why | Pinned at |
+|---|---|---|
+| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.0 |
+| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.8.4 |
+
+**They must agree on the core version.** `bb-mobile-ffi` pins `bb-receipt-ffi`
+itself; if this repo pins a different tag, cargo resolves two copies of the core
+and the packaged library carries the wrong one. `Cargo.lock` is committed, so a
+duplicate `bb-receipt-ffi` entry there is the tell — check it after any bump.
+
+Bumping the core therefore has an extra hop: land it in `beanbeaver-core`, tag,
+land it in `beanbeaver-mobile-util`, tag *that*, then move both pins here
+together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
+
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.8.4**. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.8.4**, reached *through* mobile-util
+  v0.1.0 — see the table above before bumping either. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -350,14 +371,21 @@ and no fastlane metadata.
   tag shapes on purpose: a batch saved by the previous build is still on disk
   when the app updates. Pre-0.7.0 `category` is deliberately *not* read into
   `account` — it held a classifier key (`grocery_dairy`), not an account.
-- The `bb-receipt-ffi` git dep can't be run via `cargo run -p bb-receipt-ffi`; codegen
-  is hosted by the local `uniffi-bindgen` bin (see `shared/src/bin/uniffi-bindgen.rs`).
+- The git deps can't be run via `cargo run -p <dep>`; codegen is hosted by the local
+  `uniffi-bindgen` bin (see `shared/src/bin/uniffi-bindgen.rs`), pointed at the built
+  `libbb_mobile_ffi`, which emits **both** namespaces in one pass.
 - Keep the app teachable and small; prefer straightforward Kotlin over cleverness.
-- **`SpendSummary.kt` must stay free of Android imports** — no `Context`, no
-  preferences, no Compose. That is what lets its arithmetic be pinned by JVM
-  tests rather than eyeballed on a screen, and it keeps the one genuinely
-  shareable part of spend tracking liftable if ios/android ever share logic.
-  `BudgetPrefs` and `AmountPrivacy` hold the platform-bound halves; a target is
+- **The spend arithmetic is not in this repo any more.** It is
+  `spend-core` in `beanbeaver-mobile-util`, reached through the `bb_mobile_ffi`
+  namespace, so this app and iOS compute spending from one implementation.
+  `SpendSummary.kt` keeps only what is genuinely Android's: the **projection**
+  (`SpendRecord` → `SpendInput`, including resolving `scannedAt` to a local
+  calendar date, which needs a timezone database Rust deliberately does not
+  carry) and **re-attachment** (Rust returns a record id and an item index; the
+  screens want the app's own objects). Its public Kotlin surface is unchanged,
+  so no screen moved. Don't re-add arithmetic here — a second implementation's
+  opinion is the thing that was just deleted. `BudgetPrefs` keeps the *storage*
+  of the budget target while the *resolution rule* moved too; a target is still
   an overlay drawn on top of the arithmetic and must never be an input to it.
 - **Process-wide stores, not ViewModels**, for `SpendStore`, `ItemRuleStore` and
   `AmountPrivacy`: both scan paths write to them and several screens read them,

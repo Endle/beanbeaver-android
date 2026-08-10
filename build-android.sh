@@ -30,8 +30,10 @@ ANDROID_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ANDROID_ROOT"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ANDROID_ROOT/target}"
 
-CRATE=bb-receipt-ffi
-LIB_NAME=bb_receipt_ffi
+# The umbrella library: spend-core's UniFFI seam, carrying the parse core's
+# namespace in the same artifact. See beanbeaver-mobile-util's CLAUDE.md.
+CRATE=bb-mobile-ffi
+LIB_NAME=bb_mobile_ffi
 PACKAGE=beanbeaver-android-ffi-build
 PROFILE="${PROFILE:-release}"
 profile_dir="$PROFILE"; [ "$PROFILE" = "debug" ] && profile_dir=debug
@@ -42,7 +44,9 @@ ABIS="${ABIS:-arm64-v8a}"
 
 PKG="$ANDROID_ROOT/bbreceiptkit"
 JNI="$PKG/src/main/jniLibs"
-GEN_OUT="$PKG/src/main/kotlin/uniffi/bb_receipt_ffi"
+# Fallback only — codegen emits a uniffi/<namespace>/ tree (two of them now)
+# and the whole tree is copied wholesale below.
+GEN_OUT="$PKG/src/main/kotlin/uniffi/bb_mobile_ffi"
 WORK="$CARGO_TARGET_DIR/android-work"
 
 abi_to_target() {
@@ -179,6 +183,13 @@ for abi in $ABIS; do
   fi
 done
 
+# Wipe rather than overlay. jniLibs/ is generated and git-ignored, and every
+# file in it is reinstalled below, so nothing is lost — but a *stale* .so left
+# behind is packaged into the APK all the same. The rename from
+# libbb_receipt_ffi.so to libbb_mobile_ffi.so made that concrete: without this,
+# any existing checkout ships both, ~450 MB of native library for an app that
+# needs one. Same reasoning as the `rm -rf .../kotlin/uniffi` before codegen.
+rm -rf "$JNI"
 mkdir -p "$JNI"
 find_ort_so() {
   local target="$1" abi="$2"

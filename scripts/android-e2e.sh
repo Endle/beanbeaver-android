@@ -2,7 +2,7 @@
 #
 # On-device E2E for Android: run receipt fixtures through the app's real scan
 # pipeline on a connected emulator/device, then diff against expected.json via
-# compare-e2e.py.
+# shared/scripts/compare-e2e.py.
 #
 #   ./scripts/android-e2e.sh <receipts_e2e-dir>          # all cases
 #   ./scripts/android-e2e.sh <receipts_e2e-dir> --all
@@ -132,7 +132,7 @@ done
 
 "$ADB" pull "$REMOTE_OUT" "$WORK/batch_out.json" >/dev/null
 echo "── compare ──"
-python3 "$HERE/compare-e2e.py" \
+python3 "$HERE/../shared/scripts/compare-e2e.py" \
   --results "$WORK/batch_out.json" \
   --manifest "$WORK/manifest.json" \
   ${PRIVATE_RULES:+--private-rules "$PRIVATE_RULES"}

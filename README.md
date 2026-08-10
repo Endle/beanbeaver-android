@@ -72,7 +72,8 @@ cargo run --release --bin batch_e2e -- \
 
 | Concern | Approach |
 |---------|----------|
-| Core | `bb-receipt-ffi` from [beanbeaver-core](https://github.com/Endle/beanbeaver-core) (git tag in `Cargo.toml`) |
+| Core | `bb-mobile-ffi` from [beanbeaver-mobile-util](https://github.com/Endle/beanbeaver-mobile-util) (git tag in `Cargo.toml`), which carries `bb-receipt-ffi` from [beanbeaver-core](https://github.com/Endle/beanbeaver-core) inside it — one `libbb_mobile_ffi.so`, two UniFFI namespaces |
+| Spend arithmetic | `spend-core` in the same repo — shared with beanbeaver-ios, not reimplemented here |
 | Bindings | UniFFI → Kotlin (JNA) |
 | Models | Assets → `filesDir/models` (`ModelStore`) |
 | Session | One process-wide `OcrSession` |
