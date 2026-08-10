@@ -11,5 +11,5 @@ When this tree lives next to the iOS app, Gradle also falls back to `../models/`
 Download (pinned release used by beanbeaver-core):
 
 ```bash
-./scripts/fetch-models.sh
+./shared/scripts/fetch-models.sh
 ```

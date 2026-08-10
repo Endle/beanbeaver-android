@@ -7,14 +7,21 @@ default-run = "uniffi-bindgen"
 
 # Standalone Android tree: UniFFI bindgen + host batch_e2e harness.
 # Keep the bb-receipt-ffi tag in step with the iOS root Cargo.toml when bumping.
+#
+# Both bins live in the `shared/` submodule (beanbeaver-mobile-util) — iOS
+# builds the same two files from the same commit. They are compiled *here*
+# rather than depended on as a crate so each app builds them against its own
+# pinned bb-receipt-ffi tag: batch_e2e.rs uses OcrSession/Phase/ScanTimings/
+# ReceiptWarningKind, so a breaking FFI bump changes it. `git submodule update
+# --init` if `shared/` is empty.
 
 [[bin]]
 name = "uniffi-bindgen"
-path = "src/bin/uniffi-bindgen.rs"
+path = "shared/src/bin/uniffi-bindgen.rs"
 
 [[bin]]
 name = "batch_e2e"
-path = "src/bin/batch_e2e.rs"
+path = "shared/src/bin/batch_e2e.rs"
 
 [dependencies]
 # In step with the iOS root Cargo.toml. v0.7.0 is a BREAKING FFI change — the

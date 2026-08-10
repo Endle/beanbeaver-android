@@ -34,7 +34,10 @@ on:
   pull_request:
     paths:
       - 'scripts/build-ort-android.sh'
-      - 'scripts/fetch-models.sh'
+      # The submodule pointer: bumping shared/ can move fetch-models.sh or the
+      # uniffi-bindgen bin this build compiles.
+      - 'shared'
+      - '.gitmodules'
       - 'build-android.sh'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -59,6 +62,12 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          # shared/ (beanbeaver-mobile-util) holds the uniffi-bindgen and
+          # batch_e2e sources the Cargo.toml [[bin]] paths point at, plus
+          # fetch-models.sh and compare-e2e.py. Without this the cargo
+          # build fails on a missing bin path.
+          submodules: true
 
       # gradle.properties is the single source of truth for the NDK revision, and
       # the runner's own ANDROID_NDK_LATEST_HOME drifts with the image. Read the
@@ -87,10 +96,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: models
-          key: ocr-models-${{ hashFiles('scripts/fetch-models.sh') }}
+          key: ocr-models-${{ hashFiles('shared/scripts/fetch-models.sh') }}
 
       - name: Fetch OCR models
-        run: ./scripts/fetch-models.sh
+        run: ./shared/scripts/fetch-models.sh
 
       - uses: gradle/actions/setup-gradle@v4
 

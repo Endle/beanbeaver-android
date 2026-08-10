@@ -2,7 +2,7 @@ name: Android build
 
 # Android twin of beanbeaver-ios's ios-build.yml. Same shape — cross-compile the
 # Rust core, build the app, then run the shared receipt fixture through the real
-# pipeline and grade it with scripts/compare-e2e.py — with one difference worth
+# pipeline and grade it with shared/scripts/compare-e2e.py — with one difference worth
 # understanding before you try to "fix" it:
 #
 #   THERE IS NO EMULATOR JOB, and it isn't an oversight.
@@ -43,6 +43,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # shared/ (beanbeaver-mobile-util) holds the uniffi-bindgen and
+          # batch_e2e sources the Cargo.toml [[bin]] paths point at, plus
+          # fetch-models.sh and compare-e2e.py. Without this the cargo
+          # build fails on a missing bin path.
+          submodules: true
 
       # Android Studio's bundled JBR is 21 locally; match it here. AGP 8.13
       # needs >= 17, and the modules compile to jvmTarget 17 either way.
@@ -74,10 +80,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: models
-          key: ocr-models-${{ hashFiles('scripts/fetch-models.sh') }}
+          key: ocr-models-${{ hashFiles('shared/scripts/fetch-models.sh') }}
 
       - name: Fetch OCR models
-        run: ./scripts/fetch-models.sh
+        run: ./shared/scripts/fetch-models.sh
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -150,7 +156,7 @@ jobs:
           FIX=$(./scripts/e2e-fixtures.sh)
           cargo run --release --bin batch_e2e -- \
             --models models --in-dir "$FIX" --out "$FIX/batch_out.json"
-          python3 scripts/compare-e2e.py \
+          python3 shared/scripts/compare-e2e.py \
             --results "$FIX/batch_out.json" --manifest "$FIX/manifest.json"
 
   # The path that actually ships, which nothing exercised until v0.4.0 reached
@@ -167,6 +173,12 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          # shared/ (beanbeaver-mobile-util) holds the uniffi-bindgen and
+          # batch_e2e sources the Cargo.toml [[bin]] paths point at, plus
+          # fetch-models.sh and compare-e2e.py. Without this the cargo
+          # build fails on a missing bin path.
+          submodules: true
 
       - uses: actions/setup-java@v4
         with:
@@ -192,10 +204,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: models
-          key: ocr-models-${{ hashFiles('scripts/fetch-models.sh') }}
+          key: ocr-models-${{ hashFiles('shared/scripts/fetch-models.sh') }}
 
       - name: Fetch OCR models
-        run: ./scripts/fetch-models.sh
+        run: ./shared/scripts/fetch-models.sh
 
       - uses: gradle/actions/setup-gradle@v4
 
