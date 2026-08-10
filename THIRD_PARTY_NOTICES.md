@@ -6,7 +6,7 @@ here to satisfy the attribution terms of those licenses.
 
 The Rust crate inventory below was generated from `cargo metadata
 --filter-platform aarch64-linux-android` — the exact graph linked into
-`libbb_receipt_ffi.so` for the one ABI this app ships. Regenerate it whenever the
+`libbb_mobile_ffi.so` for the one ABI this app ships. Regenerate it whenever the
 `bb-receipt-ffi` tag moves; a tool like `cargo about` can automate it if the list
 grows.
 
@@ -26,7 +26,7 @@ The full Apache License 2.0 text appears under "Apache License 2.0" below.
 ## ONNX Runtime
 
 The OCR models are executed by ONNX Runtime, linked statically into
-`libbb_receipt_ffi.so` through the `ort` crate.
+`libbb_mobile_ffi.so` through the `ort` crate.
 
     Copyright (c) Microsoft Corporation
     Licensed under the MIT License
