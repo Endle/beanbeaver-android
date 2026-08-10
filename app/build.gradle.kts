@@ -341,6 +341,6 @@ dependencies {
 // Entry paths Gate B looks for. AGP writes the two BUNDLE-METADATA paths as
 // literal constants in PackageBundleTask; bundletool strips that directory, so
 // neither reaches a device — they exist only so Play can symbolicate and retrace.
-val CORE_LIB_ENTRY = "base/lib/arm64-v8a/libbb_receipt_ffi.so"
+val CORE_LIB_ENTRY = "base/lib/arm64-v8a/libbb_mobile_ffi.so"
 val DEBUG_SYMBOLS_PREFIX = "BUNDLE-METADATA/com.android.tools.build.debugsymbols/"
 val MAPPING_ENTRY = "BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map"

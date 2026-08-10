@@ -95,7 +95,7 @@ val verifyReleaseNativeProfile by tasks.registering {
                 |bbreceiptkit/src/main/jniLibs/ currently holds the output of
                 |    PROFILE=$profile ./build-android.sh
                 |
-                |A debug libbb_receipt_ffi.so is ~224 MB rather than ~37 MB, and every
+                |A debug libbb_mobile_ffi.so is ~224 MB rather than ~37 MB, and every
                 |Rust stage of a scan runs an order of magnitude slower. Shipping one
                 |is what earned the Play warning "This artifact significantly increases
                 |the size of APK(s) downloaded by users".

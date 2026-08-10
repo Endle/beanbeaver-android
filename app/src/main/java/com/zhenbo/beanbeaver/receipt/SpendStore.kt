@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import uniffi.bb_mobile_ffi.spendDeclaredRoots
+import uniffi.bb_mobile_ffi.spendFallbackBudgetRoot
+import uniffi.bb_mobile_ffi.spendResolveBudgetRoot
 import uniffi.bb_receipt_ffi.ReceiptResult
 import java.io.File
 import java.util.UUID
@@ -297,9 +300,9 @@ object BudgetPrefs {
     /**
      * Fallback when nothing is declared and nothing is stored — the app's most
      * common use case names it directly rather than falling back to an arbitrary
-     * first tag.
+     * first tag. Defined by the shared crate so iOS cannot disagree.
      */
-    const val FALLBACK_ROOT = "grocery"
+    val FALLBACK_ROOT: String by lazy { spendFallbackBudgetRoot() }
 
     /**
      * Root tags the current rule corpus actually declares, first-path-segment
@@ -308,23 +311,22 @@ object BudgetPrefs {
      */
     fun declaredRoots(context: Context): List<String> {
         ItemRuleStore.ensureLoaded(context)
-        return (ItemRuleStore.book.value?.tags() ?: emptyList())
-            .mapNotNull { it.path.substringBefore('/').takeIf(String::isNotEmpty) }
-            .distinct()
+        return spendDeclaredRoots((ItemRuleStore.book.value?.tags() ?: emptyList()).map { it.toFfi() })
     }
 
     /**
      * The target's root tag: the user's stored choice if the corpus still declares
      * it, else [FALLBACK_ROOT] if that's declared, else whatever the corpus
      * declares first.
+     *
+     * The *rule* lives in the shared Rust crate (`spend_resolve_budget_root`) so
+     * iOS resolves it identically; only the storage below is Android's. The
+     * "still declares it" clause is the one that matters — a stored root can
+     * outlive the rule that produced it, and a target pointing at a category the
+     * corpus no longer has would silently draw against nothing.
      */
-    fun root(context: Context): String {
-        val roots = declaredRoots(context)
-        val stored = prefs(context).getString(KEY_ROOT, null)
-        if (stored != null && stored in roots) return stored
-        if (FALLBACK_ROOT in roots) return FALLBACK_ROOT
-        return roots.firstOrNull() ?: FALLBACK_ROOT
-    }
+    fun root(context: Context): String =
+        spendResolveBudgetRoot(prefs(context).getString(KEY_ROOT, null), declaredRoots(context))
 
     fun setRoot(context: Context, value: String) {
         prefs(context).edit().putString(KEY_ROOT, value).apply()

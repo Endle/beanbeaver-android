@@ -1,15 +1,27 @@
 package com.zhenbo.beanbeaver.receipt
 
-import com.zhenbo.beanbeaver.ui.priceValue
-import com.zhenbo.beanbeaver.ui.tagDisplay
+import uniffi.bb_mobile_ffi.SpendCategory
+import uniffi.bb_mobile_ffi.SpendDate
+import uniffi.bb_mobile_ffi.SpendInput
+import uniffi.bb_mobile_ffi.SpendItem
+import uniffi.bb_mobile_ffi.SpendItemEntry
+import uniffi.bb_mobile_ffi.SpendTag
+import uniffi.bb_mobile_ffi.spendCurrentMonthId
+import uniffi.bb_mobile_ffi.spendDefaultMonthId
+import uniffi.bb_mobile_ffi.spendItems
+import uniffi.bb_mobile_ffi.spendLeafLabel
+import uniffi.bb_mobile_ffi.spendMonth
+import uniffi.bb_mobile_ffi.spendMonthId
+import uniffi.bb_mobile_ffi.spendMonthIds
+import uniffi.bb_mobile_ffi.spendMonthLabel
+import uniffi.bb_mobile_ffi.spendReceiptGroups
+import uniffi.bb_mobile_ffi.spendUncategorizedRoot
+import uniffi.bb_receipt_ffi.ItemTag
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
 import java.time.Instant
 import java.time.LocalDate
-import java.time.YearMonth
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import java.util.UUID
 
 /**
@@ -114,19 +126,35 @@ val List<SpendRecord>.lastExportedAt: Long? get() = mapNotNull { it.exportedAt }
 val List<SpendRecord>.reachedTargets: List<String>
     get() = flatMap { it.exportedTargets }.distinct()
 
+
 /**
- * Pure arithmetic over [SpendRecord]s — what a month of scanned receipts adds up
- * to, grouped the way the items were classified. Kotlin twin of iOS
- * `SpendSummary`.
+ * What a month of scanned receipts adds up to, grouped the way the items were
+ * classified.
  *
- * Computed fresh rather than cached, since the substrate (a few thousand records
- * at most) is cheap to re-scan. **No Android imports, no preference reads, no
- * view code**, so every figure here is checkable from a JVM unit test.
+ * **The arithmetic itself is no longer here.** It lives in the shared Rust
+ * crate `spend-core` (beanbeaver-mobile-util), reached through the
+ * `bb_mobile_ffi` UniFFI namespace, so this app and `beanbeaver-ios` compute
+ * spending from one implementation instead of two hand-synced ports. What
+ * remains in this file is the part that is genuinely Android's:
+ *
+ *  - **the projection** — [SpendRecord] down to the slim [SpendInput] Rust
+ *    reads, including resolving `scannedAt` to a local calendar date, which
+ *    needs a timezone database Rust deliberately does not carry;
+ *  - **re-attachment** — Rust identifies a receipt by id and an item by index,
+ *    so the types below hand back the app's own [SpendRecord] / [ReceiptItem]
+ *    objects that the screens draw from.
+ *
+ * The public surface is unchanged, so no screen had to move. Computed fresh
+ * rather than cached, as before.
  *
  * **Every figure comes from `result.items`, not `result.total`.** A bank feed
  * already knows a Costco run was $148.73; only this app knows it was $54.45
  * grocery, $24.99 household and $58.40 gas. [Month.receiptTotal] is carried along
  * solely to reconcile against, never to spend from.
+ *
+ * The behaviour is pinned by `spend-core`'s 28 Rust tests rather than by the JVM
+ * tests that used to live in `SpendSummaryTest.kt`; what that file still covers
+ * is the projection and re-attachment below, which are this side's own risk.
  */
 object SpendSummary {
 
@@ -144,11 +172,7 @@ object SpendSummary {
     data class RootGroup(
         /** The raw root tag ("grocery") — matches the stored budget root. */
         val id: String,
-        /**
-         * The authored display label ("Grocery"), taken from the tag vocabulary
-         * when it's available rather than capitalized here — the same reason
-         * [tagDisplay] uses `display` verbatim.
-         */
+        /** The authored display label ("Grocery"), from the tag vocabulary. */
         val label: String,
         val amount: Double,
         val itemCount: Int,
@@ -171,138 +195,33 @@ object SpendSummary {
         val receiptCount: Int,
         val excludedCount: Int,
         val unreadablePriceCount: Int,
+        /** Includes excluded rows: the Receipts list still shows them. */
         val records: List<SpendRecord>,
+        /**
+         * The largest single leaf anywhere in the month, so every category bar on
+         * screen shares one scale and is actually comparable.
+         */
+        val maxLeafAmount: Double,
+        /**
+         * How far [tracked] sits from what the receipts themselves totalled, or
+         * null when they agree. Non-null is normal rather than alarming: a scan
+         * that reads every item but misses a `-5.00` discount line lands here.
+         */
+        val unaccounted: Double?,
     ) {
         /**
          * The group for [root], or null when the month has no spend under it —
          * how the spending screen finds the one group a target applies to.
          */
         fun group(root: String): RootGroup? = roots.firstOrNull { it.id == root }
-
-        /**
-         * The largest single leaf anywhere in the month, so every category bar on
-         * screen shares one scale and is actually comparable. Scaling per group
-         * would put each root on its own invisible scale.
-         */
-        val maxLeafAmount: Double
-            get() = roots.flatMap { it.leaves }.maxOfOrNull { it.amount } ?: 0.0
-
-        /**
-         * How far [tracked] sits from what the receipts themselves totalled, or
-         * null when they agree. Non-null is normal rather than alarming: a scan
-         * that reads every item but misses a `-5.00` discount line lands here, as
-         * does one whose `total` didn't parse. The screen names it instead of
-         * leaving the reader to subtract two numbers.
-         */
-        val unaccounted: Double?
-            get() = (tracked - receiptTotal).takeIf { kotlin.math.abs(it) >= 0.01 }
     }
-
-    // MARK: - Month bucketing
-
-    private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US)
-    private val MONTH_ID = DateTimeFormatter.ofPattern("yyyy-MM", Locale.US)
-
-    private fun monthLabelFormatter() = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
-
-    /**
-     * The current calendar month's id — what a screen shows before anything has
-     * been scanned into it.
-     */
-    fun currentMonthId(today: LocalDate = LocalDate.now()): String = today.format(MONTH_ID)
-
-    /**
-     * The calendar month a record belongs to: `result.date` unless it's missing or
-     * a placeholder, in which case the row's own [SpendRecord.scannedAt] steps in
-     * — mirroring `MoneyManagerExport.dateString`'s fallback, but with the row's
-     * own scan time instead of "today", so a bucket can't drift with the clock on
-     * a later run.
-     */
-    fun monthId(record: SpendRecord): String {
-        val iso = record.result.date
-        if (!record.result.dateIsPlaceholder && iso != null) {
-            val parsed = runCatching { LocalDate.parse(iso, ISO) }.getOrNull()
-            if (parsed != null) return parsed.format(MONTH_ID)
-        }
-        return Instant.ofEpochMilli(record.scannedAt)
-            .atZone(ZoneId.systemDefault())
-            .toLocalDate()
-            .format(MONTH_ID)
-    }
-
-    /** Every month with at least one record, newest first. */
-    fun monthIds(records: List<SpendRecord>): List<String> =
-        records.map(::monthId).distinct().sortedDescending()
-
-    /**
-     * The month a screen opens on: the newest one with receipts in it, falling
-     * back to the current calendar month when there are none at all.
-     *
-     * Deliberately *not* "the current month": scanning happens in bursts, and a
-     * screen that opens on a $0.00 October because the last receipt was in
-     * September shows nothing and looks broken. Both the home card and the
-     * spending screen route through this, so the number on the card is the month
-     * tapping it lands on.
-     */
-    fun defaultMonthId(records: List<SpendRecord>): String =
-        monthIds(records).firstOrNull() ?: currentMonthId()
-
-    /** "2026-07" -> "July 2026", or [id] unchanged if it isn't a month id. */
-    fun monthLabel(id: String): String =
-        runCatching { YearMonth.parse(id, MONTH_ID).atDay(1).format(monthLabelFormatter()) }
-            .getOrDefault(id)
-
-    // MARK: - Classification
-
-    /**
-     * Sentinel root for items the classifier left untagged. Kept as a real group
-     * rather than dropped, so the breakdown always reconciles against what was
-     * actually scanned — same intent as `MoneyManagerExport.rows`.
-     */
-    const val UNCATEGORIZED_ROOT = "uncategorized"
-
-    /**
-     * The item's top-level category. The classifier emits tags broad→specific, so
-     * the *first* tag carries the root. A path may itself be nested
-     * ("grocery/meat"), hence the split.
-     */
-    private fun root(item: ReceiptItem): String =
-        item.tags.firstOrNull()?.path?.substringBefore('/')?.takeIf { it.isNotEmpty() }
-            ?: UNCATEGORIZED_ROOT
-
-    /**
-     * The authored label for a root, when this item's tag list carries the root
-     * tag itself — the vocabulary's own wording beats capitalizing a raw path
-     * segment ("personalcare" -> "Personal Care", not "Personalcare").
-     */
-    private fun rootLabel(item: ReceiptItem, root: String): String? =
-        item.tags.firstOrNull { it.path == root && it.display.isNotEmpty() }?.display
-
-    /**
-     * The item's display leaf — the app's existing label ([tagDisplay]), so
-     * spending, the result card and the Money Manager export agree by
-     * construction.
-     *
-     * Not private: the drill-down groups by the same label the totals were
-     * accumulated under, so it can't disagree with the figure that was tapped to
-     * reach it.
-     */
-    fun leafLabel(item: ReceiptItem): String =
-        tagDisplay(item.tags).primary ?: "Uncategorized"
-
-    // MARK: - Drill-down
 
     /**
      * One line item, with the receipt it came from. What a category total is
-     * actually made of — tapping "Dairy $19.38" asks *which items*, and a receipt
-     * list would answer with whole-receipt totals that have nothing to do with the
-     * number tapped.
+     * actually made of — tapping "Dairy $19.38" asks *which items*.
      */
     data class ItemEntry(
-        /**
-         * Stable within a month: a record's id plus the item's index in it. Two
-         * identical lines on one receipt stay distinct rows.
-         */
+        /** Stable within a month: a record's id plus the item's index in it. */
         val id: String,
         val item: ReceiptItem,
         val record: SpendRecord,
@@ -312,185 +231,183 @@ object SpendSummary {
     /**
      * One receipt's contribution to a category: the items of it that landed under
      * the tapped category, and the receipt they were printed on.
-     *
-     * The unit the drill-down lists, because a category total is spread over
-     * *purchases* — "$8.42 of this Costco run was dairy" is the shape of the
-     * answer, and repeating the merchant on every item row buries it.
-     *
-     * Derived from [items] rather than accumulated separately: one matching
-     * predicate means a group can't disagree with the flat list, or with the
-     * figure that was tapped to reach it.
      */
     data class ReceiptGroup(
         val record: SpendRecord,
         /** The matching items, in the order they were printed. */
         val entries: List<ItemEntry>,
-        /**
-         * What those items add up to — this receipt's share of the category total.
-         * [entries] sums to this, and every group sums to the category.
-         */
+        /** This receipt's share of the category total. */
         val amount: Double,
-        /**
-         * The whole receipt's total, or null when `result.total` didn't parse.
-         * Carried as context only — never spent from, per this type's header.
-         */
+        /** The whole receipt's total, or null when it didn't parse. Context only. */
         val receiptTotal: Double?,
     )
 
     /**
-     * What a category is selected by — a whole top-level group, or one leaf inside
-     * it. The two cases exist because tapping a card's header and tapping a row in
-     * it are different questions.
-     *
-     * A root is selected by its **raw tag id**, not its display label: the group's
-     * label is whatever authored wording any of its items supplied
-     * ("personalcare" -> "Personal Care"), so matching on the label would drop
-     * every item in the group that didn't carry the root tag itself. A leaf
-     * carries no such id — [leafLabel] is the only thing it was ever accumulated
-     * under — so it matches on the label it was grouped by.
+     * What a category is selected by — a whole top-level group, or one leaf
+     * inside it. A root is selected by its **raw tag id**, not its display
+     * label: matching on the label would drop every item in the group that
+     * didn't itself carry the root tag.
      */
     sealed interface Category {
         data class Root(val id: String) : Category
         data class Leaf(val label: String) : Category
     }
 
-    /**
-     * Every item in [records] under [category], newest receipt first, and within a
-     * receipt in the order the items were printed.
-     *
-     * Recomputed from the month's records rather than stored during accumulation:
-     * the substrate is small, and deriving it here means the list and the total
-     * can't drift apart. Excluded receipts are left out, matching every other
-     * figure on the spending screen.
-     */
-    fun items(category: Category, records: List<SpendRecord>): List<ItemEntry> = buildList {
-        for (record in records) {
-            if (record.isExcluded) continue
-            record.result.items.forEachIndexed { index, item ->
-                val matches = when (category) {
-                    is Category.Root -> root(item) == category.id
-                    is Category.Leaf -> leafLabel(item) == category.label
-                }
-                if (!matches) return@forEachIndexed
-                add(
-                    ItemEntry(
-                        id = "${record.id}-$index",
-                        item = item,
-                        record = record,
-                        amount = priceValue(item.price) ?: 0.0,
-                    ),
-                )
-            }
-        }
-    }
+    /** Sentinel root for items the classifier left untagged. */
+    val UNCATEGORIZED_ROOT: String by lazy { spendUncategorizedRoot() }
+
+    // MARK: - Month bucketing
+
+    /** The current calendar month's id. */
+    fun currentMonthId(today: LocalDate = LocalDate.now()): String =
+        spendCurrentMonthId(today.toFfi())
 
     /**
-     * [items], grouped by the receipt each item was printed on.
-     *
-     * Newest receipt first, and within a receipt the printed order — both
-     * inherited rather than re-sorted: [items] walks [records] in store order
-     * (newest-first) and each receipt's items in index order, so accumulating in
-     * first-seen order preserves both.
+     * The calendar month a record belongs to: `result.date` unless it's missing
+     * or a placeholder, in which case the row's own scan date steps in.
      */
+    fun monthId(record: SpendRecord): String = spendMonthId(record.toFfi())
+
+    /** Every month with at least one record, newest first. */
+    fun monthIds(records: List<SpendRecord>): List<String> =
+        spendMonthIds(records.map { it.toFfi() })
+
+    /**
+     * The month a screen opens on: the newest one with receipts in it, falling
+     * back to the current calendar month when there are none at all.
+     *
+     * Deliberately *not* "the current month": scanning happens in bursts, and a
+     * screen that opens on a $0.00 October because the last receipt was in
+     * September shows nothing and looks broken.
+     */
+    fun defaultMonthId(records: List<SpendRecord>): String =
+        spendDefaultMonthId(records.map { it.toFfi() }, LocalDate.now().toFfi())
+
+    /** "2026-07" -> "July 2026", or [id] unchanged if it isn't a month id. */
+    fun monthLabel(id: String): String = spendMonthLabel(id)
+
+    /**
+     * The item's display leaf.
+     *
+     * **Twin of [tagDisplay]'s `primary`, and they must not drift** — the
+     * spending screen groups by this while the result card labels by
+     * `tagDisplay`, so a divergence shows up as one item filed under two names.
+     * The rule now lives in Rust (`spend_core::leaf_label`); this delegates
+     * rather than reimplementing so there is only one place to change.
+     */
+    fun leafLabel(item: ReceiptItem): String = spendLeafLabel(item.tags.map { it.toFfi() })
+
+    // MARK: - Drill-down
+
+    /**
+     * Every item in [records] under [category], newest receipt first, and within
+     * a receipt in the order the items were printed. Excluded receipts are left
+     * out, matching every other figure on the spending screen.
+     */
+    fun items(category: Category, records: List<SpendRecord>): List<ItemEntry> {
+        val byId = records.associateBy { it.id }
+        return spendItems(category.toFfi(), records.map { it.toFfi() })
+            .mapNotNull { it.reattach(byId) }
+    }
+
+    /** [items], grouped by the receipt each item was printed on. */
     fun receipts(category: Category, records: List<SpendRecord>): List<ReceiptGroup> {
-        val grouped = LinkedHashMap<String, MutableList<ItemEntry>>()
-        for (entry in items(category, records)) {
-            grouped.getOrPut(entry.record.id) { mutableListOf() }.add(entry)
-        }
-        return grouped.values.map { entries ->
-            ReceiptGroup(
-                record = entries.first().record,
-                entries = entries,
-                amount = entries.sumOf { it.amount },
-                receiptTotal = priceValue(entries.first().record.result.total),
-            )
-        }
+        val byId = records.associateBy { it.id }
+        return spendReceiptGroups(category.toFfi(), records.map { it.toFfi() })
+            .mapNotNull { group ->
+                val record = byId[group.recordId] ?: return@mapNotNull null
+                ReceiptGroup(
+                    record = record,
+                    entries = group.entries.mapNotNull { it.reattach(byId) },
+                    amount = group.amount,
+                    receiptTotal = group.receiptTotal,
+                )
+            }
     }
 
     // MARK: - Arithmetic
 
-    /**
-     * Insertion-ordered accumulation so ties in amount keep a stable order through
-     * the largest-first sorts.
-     */
-    private class RootAccumulator(var label: String) {
-        var amount = 0.0
-        var itemCount = 0
-        val leaves = LinkedHashMap<String, Pair<Double, Int>>()
-
-        fun add(leaf: String, value: Double) {
-            amount += value
-            itemCount += 1
-            val (sum, count) = leaves[leaf] ?: (0.0 to 0)
-            leaves[leaf] = (sum + value) to (count + 1)
-        }
-    }
-
     fun month(id: String, records: List<SpendRecord>): Month {
-        val monthRecords = records.filter { monthId(it) == id }
-        val excludedCount = monthRecords.count { it.isExcluded }
-        val tracked = monthRecords.filterNot { it.isExcluded }
-
-        var itemsTotal = 0.0
-        var tax = 0.0
-        var receiptTotal = 0.0
-        var unreadablePriceCount = 0
-        val rootTotals = LinkedHashMap<String, RootAccumulator>()
-
-        for (record in tracked) {
-            val result: ReceiptResult = record.result
-            receiptTotal += priceValue(result.total) ?: 0.0
-            priceValue(result.tax)?.let { tax += it }
-            for (item in result.items) {
-                // An unreadable price is counted and carried at zero rather than
-                // dropped: the item still happened, and the footer says how many
-                // couldn't be read.
-                val parsed = priceValue(item.price)
-                if (parsed == null) unreadablePriceCount += 1
-                val amount = parsed ?: 0.0
-                itemsTotal += amount
-
-                val rootId = root(item)
-                val acc = rootTotals.getOrPut(rootId) {
-                    RootAccumulator(
-                        if (rootId == UNCATEGORIZED_ROOT) {
-                            "Uncategorized"
-                        } else {
-                            rootId.replaceFirstChar { it.uppercase() }
-                        },
-                    )
-                }
-                rootLabel(item, rootId)?.let { acc.label = it }
-                acc.add(leafLabel(item), amount)
-            }
-        }
-
-        val roots = rootTotals
-            .map { (rootId, acc) ->
-                RootGroup(
-                    id = rootId,
-                    label = acc.label,
-                    amount = acc.amount,
-                    itemCount = acc.itemCount,
-                    leaves = acc.leaves
-                        .map { (label, v) -> Leaf(label = label, amount = v.first, itemCount = v.second) }
-                        .sortedByDescending { it.amount },
-                )
-            }
-            .sortedByDescending { it.amount }
-
+        val byId = records.associateBy { it.id }
+        val m = spendMonth(id, records.map { it.toFfi() })
         return Month(
-            id = id,
-            label = monthLabel(id),
-            tracked = itemsTotal + tax,
-            itemsTotal = itemsTotal,
-            roots = roots,
-            tax = tax,
-            receiptTotal = receiptTotal,
-            receiptCount = tracked.size,
-            excludedCount = excludedCount,
-            unreadablePriceCount = unreadablePriceCount,
-            records = monthRecords,
+            id = m.id,
+            label = m.label,
+            tracked = m.tracked,
+            itemsTotal = m.itemsTotal,
+            roots = m.roots.map { root ->
+                RootGroup(
+                    id = root.id,
+                    label = root.label,
+                    amount = root.amount,
+                    itemCount = root.itemCount.toInt(),
+                    leaves = root.leaves.map { Leaf(it.label, it.amount, it.itemCount.toInt()) },
+                )
+            },
+            tax = m.tax,
+            receiptTotal = m.receiptTotal,
+            receiptCount = m.receiptCount.toInt(),
+            excludedCount = m.excludedCount.toInt(),
+            unreadablePriceCount = m.unreadablePriceCount.toInt(),
+            records = m.recordIds.mapNotNull { byId[it] },
+            maxLeafAmount = m.maxLeafAmount,
+            unaccounted = m.unaccounted,
         )
     }
+}
+
+// MARK: - Projection and re-attachment
+//
+// The seam's own code, and this file's real risk now that the arithmetic is
+// shared. `SpendSummaryTest` covers it.
+
+/**
+ * A [SpendRecord] as the shared crate reads it. Drops `rawText`, `beancount`,
+ * the photo state and the export state — none of which the arithmetic touches,
+ * and the first two of which are large strings that would otherwise be copied
+ * across the FFI on every render.
+ */
+internal fun SpendRecord.toFfi(): SpendInput = SpendInput(
+    id = id,
+    dateIso = result.date,
+    dateIsPlaceholder = result.dateIsPlaceholder,
+    scannedOn = Instant.ofEpochMilli(scannedAt).atZone(ZoneId.systemDefault()).toLocalDate().toFfi(),
+    isExcluded = isExcluded,
+    total = result.total,
+    tax = result.tax,
+    items = result.items.map { item ->
+        SpendItem(
+            description = item.description,
+            price = item.price,
+            tags = item.tags.map { it.toFfi() },
+        )
+    },
+)
+
+/**
+ * Resolved here rather than in Rust: turning an instant into a calendar date
+ * needs a timezone database *and* the offset in force at that instant, which
+ * `ZoneId.systemDefault()` already has and gets right across DST.
+ */
+internal fun LocalDate.toFfi(): SpendDate =
+    SpendDate(year = year, month = monthValue.toUInt(), day = dayOfMonth.toUInt())
+
+internal fun ItemTag.toFfi(): SpendTag = SpendTag(path = path, display = display)
+
+internal fun SpendSummary.Category.toFfi(): SpendCategory = when (this) {
+    is SpendSummary.Category.Root -> SpendCategory.Root(id)
+    is SpendSummary.Category.Leaf -> SpendCategory.Leaf(label)
+}
+
+/**
+ * Put the app's own objects back on an entry Rust identified by id and index.
+ *
+ * Null — and so dropped — if either lookup misses. That cannot happen for a list
+ * Rust derived from the very records passed in, and silently skipping beats an
+ * index crash on a spending screen if it ever does.
+ */
+internal fun SpendItemEntry.reattach(byId: Map<String, SpendRecord>): SpendSummary.ItemEntry? {
+    val record = byId[recordId] ?: return null
+    val item = record.result.items.getOrNull(itemIndex.toInt()) ?: return null
+    return SpendSummary.ItemEntry(id = id, item = item, record = record, amount = amount)
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Assemble a receipt E2E fixture directory: <stem>.jpg next to
-# <stem>.expected.json, the layout android-e2e.sh and compare-e2e.py want.
+# <stem>.expected.json, the layout android-e2e.sh and shared/scripts/compare-e2e.py want.
 #
 # The ground truth lives in tests/receipts_e2e/ but the images do not — the only
 # public fixture is the 2 MB redacted Costco receipt the app already ships as its
@@ -13,7 +13,7 @@
 #   FIX=$(./scripts/e2e-fixtures.sh)
 #   cargo run --release --bin batch_e2e -- --models models --in-dir "$FIX" \
 #       --out "$FIX/batch_out.json"                       # host, no device
-#   python3 scripts/compare-e2e.py --results "$FIX/batch_out.json" \
+#   python3 shared/scripts/compare-e2e.py --results "$FIX/batch_out.json" \
 #       --manifest "$FIX/manifest.json"
 #   ./scripts/android-e2e.sh "$FIX" --pilot               # on an emulator
 set -euo pipefail
