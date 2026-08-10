@@ -34,7 +34,7 @@ side deliberately has no twin until that comes back.
 | `scripts/` | `fetch-models.sh`, `android-e2e.sh` (adb batch harness), `compare-e2e.py`, `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
 | `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s arithmetic. |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
-| `.github/workflows/` | `android-build.yml` — the CI below. |
+| `.github/workflows/` | `android-build.yml` (the CI below) and `fdroid.yml` (the F-Droid build, separate because it is slow and narrowly triggered). |
 
 **Generated / git-ignored** (rebuilt by `build-android.sh` / Gradle): `bbreceiptkit/src/main/kotlin/uniffi/`, `bbreceiptkit/src/main/jniLibs/`, `app/src/main/assets/models/`, `app/src/main/assets/legal/`, `target/`, `local.properties`.
 
@@ -101,7 +101,7 @@ cp keystore.properties.example keystore.properties   # then fill in real values
 
 ### CI (`.github/workflows/android-build.yml`)
 
-Three `ubuntu-latest` jobs.
+Two `ubuntu-latest` jobs here, plus a third in its own file (below).
 
 **`build`** — the Android twin of iOS's `ios-build.yml`: NDK cross-build of
 `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug ./build-android.sh`) →
@@ -119,15 +119,32 @@ strip/symbol extraction, and both gates as a finalizer. Unsigned — signing has
 bearing on what the gates read. **This is the only CI coverage R8 has**, since
 `:app:assembleFullDebug` never runs it.
 
-**`fdroid-ort-from-source`** — compiles ONNX Runtime instead of downloading it
-(see the section below) and asserts the result: no `libonnxruntime` `DT_NEEDED`,
-and no `aarch64-linux-android` entry in ort's download cache. Every other job
-happily downloads a prebuilt, so this wiring can rot without any of them noticing.
-It deliberately **does not use `Swatinem/rust-cache`** — the ORT archives are a
-build input living outside `target/`, and caching the two independently is what
-wedged beanbeaver-ios's main branch (ios #57). One cache, archives only, against
-a cold cargo tree. Cold run compiles ORT (slow); warm runs restore ~110 MB of
-`.a` and skip straight to linking.
+### `fdroid.yml` — the F-Droid build
+
+`fdroid-ort-from-source` compiles ONNX Runtime instead of downloading it and
+builds the **foss** flavour, then asserts both properties rather than trusting the
+wiring: no `libonnxruntime` `DT_NEEDED` and no `aarch64-linux-android` entry in
+ort's download cache, and **zero** `com.google.android.gms` strings in the foss
+dex. Every other job happily downloads a prebuilt and links GMS, so this wiring
+can rot without any of them noticing.
+
+Its own file so it can have its own triggers: master pushes, `workflow_dispatch`,
+and **only** PRs touching build inputs (`paths:` in the workflow). The ORT compile
+is ~15 min, which is not a tax worth putting on a docs PR.
+
+**There is deliberately no cache, and that is the point.** The only thing worth
+caching is the ORT build — which is exactly what this job exists to prove still
+works. A warm run would show that linking succeeds while saying nothing about
+whether ONNX Runtime still *compiles*, and the compile is where breakage lives (a
+bumped `ort`, an upstream CMake change, `re2` moving in or out of
+`EXCLUDE_FROM_ALL`). Nothing that ships depends on it being fast: release builds
+fetch `bb-receipt-ffi` at its pinned tag and build from scratch, and F-Droid's
+buildserver has no cache of ours either. Also no `Swatinem/rust-cache` — the ORT
+archives are a build input outside `target/`, and caching the two independently is
+what wedged beanbeaver-ios's main branch (ios #57).
+
+If you add a build input, add it to that `paths:` list. A flavour file that slips
+past the filter loses its only ORT-side coverage on that PR.
 
 **There is no emulator job, and adding one is not a matter of writing YAML.**
 The app is arm64-v8a only, and no GitHub-hosted runner can run an arm64 AVD:

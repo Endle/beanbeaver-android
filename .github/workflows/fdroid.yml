@@ -1,0 +1,199 @@
+name: F-Droid build
+
+# The build F-Droid would run, kept working by running it.
+#
+# Split out of android-build.yml deliberately. F-Droid never accepts a prebuilt
+# shared library, so this compiles ONNX Runtime from source and builds the `foss`
+# flavour — and that compile is ~15 minutes, which is not a tax worth putting on
+# a documentation PR. Its own file is what lets it have its own triggers.
+#
+# There is no cache, and that is the point rather than an omission. The only
+# thing a cache could store is the ORT build — which is exactly what this job
+# exists to prove still works. A warm run would show that linking succeeds while
+# saying nothing about whether ONNX Runtime still compiles, and the compile is
+# where the breakage lives: a bumped ort version, an upstream CMake change, re2
+# moving in or out of EXCLUDE_FROM_ALL. Nothing that ships depends on this being
+# fast: release builds fetch bb-receipt-ffi at its pinned tag and build from
+# scratch, and F-Droid's own buildserver has no cache of ours either. So every
+# run here is a from-scratch rehearsal of the real thing.
+#
+# (For the record, the cache this replaces never once hit: keyed partly on a hash
+# of build-ort-android.sh, it was invalidated by editing the script's comments.)
+#
+# Also deliberately not using Swatinem/rust-cache: the ORT archives are a build
+# input outside target/, and caching the two independently is what wedged
+# beanbeaver-ios's main branch (ios #57) — cargo restores a target/ whose ort-sys
+# fingerprint says "already linked" while the archives it points at are gone.
+
+on:
+  push:
+    branches: [master]
+  # Only PRs that can actually affect this build. Everything listed either feeds
+  # the ORT compile, the link, or the foss flavour; a PR touching only Kotlin UI
+  # or docs is covered by android-build.yml.
+  pull_request:
+    paths:
+      - 'scripts/build-ort-android.sh'
+      - 'scripts/fetch-models.sh'
+      - 'build-android.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'app/build.gradle.kts'
+      - 'app/src/foss/**'
+      - 'bbreceiptkit/**'
+      - 'gradle.properties'
+      - '.github/workflows/fdroid.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: fdroid-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fdroid-ort-from-source:
+    name: FOSS build (ONNX Runtime from source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # gradle.properties is the single source of truth for the NDK revision, and
+      # the runner's own ANDROID_NDK_LATEST_HOME drifts with the image. Read the
+      # pin instead. Both the SDK install and the ORT compile below need it.
+      - name: Read the pinned NDK version
+        run: |
+          echo "BB_NDK=$(awk -F= '/^bb\.ndkVersion=/{gsub(/[[:space:]]/,"",$2); print $2}' \
+            gradle.properties)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Rust + Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # ORT wants cmake >= 3.28 (the runner image is well past that) and ninja,
+      # which is not installed by default.
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Cache OCR models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ocr-models-${{ hashFiles('scripts/fetch-models.sh') }}
+
+      - name: Fetch OCR models
+        run: ./scripts/fetch-models.sh
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install the pinned SDK packages
+        run: |
+          # See the identical step above for why `yes |` is load-bearing.
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;36.0.0" "ndk;$BB_NDK"
+          test -d "$ANDROID_HOME/ndk/$BB_NDK" || {
+            echo "::error::sdkmanager did not install ndk;$BB_NDK"; exit 1; }
+
+      # ANDROID_NDK_HOME is passed explicitly because the runner image presets it
+      # to whatever NDK it ships; the script refuses a mismatch rather than
+      # quietly compiling ORT against a different one than the Rust side uses.
+      #
+      # --print-lib-location so the directory comes back on stdout; on a clean
+      # runner there is nothing to short-circuit on, so this always does the full
+      # clone-and-compile. That is the intent — see the note at the top of this
+      # file on why this job has no cache.
+      - name: Build ONNX Runtime from source
+        run: |
+          set -euo pipefail
+          LIB="$(ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" \
+            ./scripts/build-ort-android.sh --print-lib-location)"
+          echo "ORT_LIB_DIR=$LIB" >> "$GITHUB_ENV"
+
+      - name: Build core against it (.so + UniFFI Kotlin bindings)
+        run: |
+          set -euo pipefail
+          echo "linking against $ORT_LIB_DIR"
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" \
+            ORT_ANDROID_LIB_LOCATION="$ORT_LIB_DIR" PROFILE=debug ./build-android.sh
+
+      # The actual F-Droid properties, asserted rather than assumed.
+      - name: Assert nothing prebuilt reached the Android library
+        run: |
+          set -euo pipefail
+          SO=bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so
+          READELF="$ANDROID_HOME/ndk/$BB_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+
+          echo "== DT_NEEDED =="
+          "$READELF" -d "$SO" | grep NEEDED
+          if "$READELF" -d "$SO" | grep -q 'libonnxruntime'; then
+            echo "::error::$SO wants a separate libonnxruntime.so; ORT was not linked statically"
+            exit 1
+          fi
+
+          # ort-sys caches every CDN download under a per-target directory, so
+          # this is a direct statement that the aarch64 library was not fetched.
+          #
+          # Only the Android target is asserted, and that is not an oversight:
+          # build-android.sh also runs a *host* cargo build to generate the Kotlin
+          # bindings, and that one does still download a host prebuilt. It is not
+          # shipped in the APK — but it is a real open question for F-Droid, whose
+          # build would run this same script. Tracked separately.
+          CACHED=~/.cache/ort.pyke.io/dfbin/aarch64-linux-android
+          if [ -d "$CACHED" ]; then
+            echo "::error::$CACHED exists — a prebuilt aarch64 ONNX Runtime was downloaded"
+            exit 1
+          fi
+          echo "OK: ORT statically linked from source, no aarch64 prebuilt fetched"
+
+      # The foss flavour, not the default one: this job is the F-Droid build in
+      # full, and the GMS assertion below is only meaningful against it.
+      - name: Assemble foss debug APK
+        run: ./gradlew :app:assembleFossDebug
+
+      # The other half of the F-Droid contract. GMS is named in the inclusion
+      # policy as not accepted, so a stray `implementation(...)` that reintroduces
+      # it — or a foss source-set file that imports one — has to fail here, where
+      # it is one line to read, rather than in a reviewer's queue weeks later.
+      - name: Assert no Google Play services in the foss APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/foss/debug/app-foss-debug.apk
+          # grep -a: dex is binary. Package paths appear as plain strings in the
+          # dex string pool, so this sees classes R8 kept for any reason.
+          HITS=$(unzip -p "$APK" 'classes*.dex' \
+            | LC_ALL=C grep -a -o 'com/google/android/gms/[a-z]*' | sort -u || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::foss APK references Google Play services:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "OK: no com.google.android.gms references in $APK"
+
+      - name: Report what was built
+        run: |
+          {
+            echo "### FOSS build (ONNX Runtime from source, no Play services)"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| ONNX Runtime | built from source, statically linked |"
+            echo "| static libs | $(du -ch "$ORT_LIB_DIR"/*.a | tail -1 | cut -f1) |"
+            echo "| \`libbb_receipt_ffi.so\` | $(stat -c%s bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so) B |"
+            echo "| foss APK | $(stat -c%s app/build/outputs/apk/foss/debug/app-foss-debug.apk) B |"
+            echo "| Play services | none |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload FOSS native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: libbb_receipt_ffi-foss-arm64-v8a
+          path: bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_receipt_ffi.so
+          if-no-files-found: error
