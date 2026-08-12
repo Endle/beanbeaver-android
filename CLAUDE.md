@@ -208,7 +208,14 @@ The entire difference is one dependency and one file:
 |---|---|---|
 | `play-services-mlkit-document-scanner` | yes (`fullImplementation`) | **no** |
 | `ui/DocumentScan.kt` | GMS guided capture (edge-detect, deskew, retake) | system photo picker |
+| `BuildConfig.DISTRIBUTION` | `"ML Kit (Play services)"` | `"FOSS (photo picker)"` |
 | everything else | identical | identical |
+
+`DISTRIBUTION` is a `buildConfigField` set in each flavour block and shown in
+Settings > About, so a user reporting a scan problem can say which build they
+have. It is declared beside the flavour rather than switched on
+`BuildConfig.FLAVOR` at the call site, to keep the flavour block the only place
+that spells out the difference.
 
 `rememberDocumentScanLauncher` has the same signature in both source sets, so
 `ui/BeanBeaverApp.kt` calls it without knowing the flavour and neither file needs
@@ -325,8 +332,13 @@ and no fastlane metadata.
 
 | Dep | Why | Pinned at |
 |---|---|---|
-| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.0 |
-| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.8.4 |
+| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.1 |
+| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.9.0 |
+
+The `shared/` submodule pointer is a **third** thing to move and is not covered by
+either pin: `shared/src/bin/` is compiled into this package, so a mobile-util tag
+bump usually wants the submodule moved to the same commit. Both apps must land on
+the same one.
 
 **They must agree on the core version.** `bb-mobile-ffi` pins `bb-receipt-ffi`
 itself; if this repo pins a different tag, cargo resolves two copies of the core
@@ -339,8 +351,8 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.8.4**, reached *through* mobile-util
-  v0.1.0 — see the table above before bumping either. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.9.0**, reached *through* mobile-util
+  v0.1.1 — see the table above before bumping either. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -350,7 +362,10 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
   until CI started compiling it. The one-command check is
   `git -C ../beanbeaver-core diff <from> <to> -- crates/ffi/src/lib.rs`; empty
   output means only the parse changed (v0.7.1 → v0.7.11 was empty; v0.7.11 →
-  v0.8.4 was not — see below).
+  v0.8.4 was not — see below). **Non-empty is not the same as breaking**: read the
+  diff. v0.8.4 → v0.9.0 touches five lines and none of them are exported — imports
+  moved from `ocr_paddle::` to the `scan` composition root (core #61), so no Kotlin
+  call site and no `batch_e2e.rs` symbol moved.
 - **A warning is a record, not a string** (core v0.8.0). `ReceiptResult.warnings`
   is `[ReceiptWarning]` (`kind` + `message` + `afterItemIndex`) and
   `warning_after_item_indices` is gone. `WarningSeverity.kt` is the single place

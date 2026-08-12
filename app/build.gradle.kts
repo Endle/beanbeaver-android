@@ -148,9 +148,17 @@ android {
             // So a bare `./gradlew :app:assembleDebug`-shaped habit, and the IDE's
             // default run configuration, keep meaning the Play build.
             isDefault = true
+            // Shown in Settings > About under the version. Declared here rather
+            // than switched on BuildConfig.FLAVOR in the UI so the flavour block
+            // stays the only place that spells out what the two builds differ on
+            // — the same reason DocumentScan.kt is per-source-set. Names the
+            // capture engine, because that is the whole difference and it is
+            // what a scan report needs to disambiguate.
+            buildConfigField("String", "DISTRIBUTION", "\"ML Kit (Play services)\"")
         }
         create("foss") {
             dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION", "\"FOSS (photo picker)\"")
         }
     }
 

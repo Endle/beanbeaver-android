@@ -51,8 +51,15 @@ path = "shared/src/bin/batch_e2e.rs"
 #   WarningSeverity.kt). Treat it as open: `else ->` must degrade, never crash.
 # v0.8.1 -> v0.8.4 is parser/rules work on top: Costco TPD discounts, split tax
 # buckets, tax codes kept out of the price column, and tender/total findings.
+#
+# v0.9.0 is NOT a breaking FFI change, despite `git diff v0.8.4 v0.9.0 --
+# crates/ffi/src/lib.rs` being non-empty. The five changed lines are imports
+# moving from `ocr_paddle::` to the new `scan` composition root (core #61); no
+# exported UniFFI signature moved, so no Kotlin call site and no batch_e2e.rs
+# symbol changes. The parse content is core #62: QUAIL no longer claims QUALITY,
+# and Frozen/Dim Sum department items classify.
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.8.4" }
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9.0" }
 # The library the app actually loads. It re-exports nothing and is called only
 # through the generated Kotlin; the dependency exists so `cargo build -p
 # bb-mobile-ffi` produces libbb_mobile_ffi.so, which carries BOTH uniffi
@@ -64,7 +71,7 @@ bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.8
 # direct bb-receipt-ffi dep is only here for shared/src/bin/batch_e2e.rs, which
 # uses the core's Rust API. Cargo.lock is committed — a duplicate
 # bb-receipt-ffi entry there is the tell.
-bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.0" }
+bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.1" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }
