@@ -19,7 +19,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -122,7 +124,20 @@ private fun DisconnectedContent(vm: GitHubSyncViewModel, openUrl: (String) -> Un
                     Text(p.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.size(12.dp))
                 }
-                Button(onClick = { vm.connect(openUrl) }, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = {
+                        // Copy first, then hand over to the browser: GitHub's page
+                        // asks for the code with an empty field, and once it is in
+                        // front of the user this screen's tap-to-copy is no longer
+                        // reachable. Copying here is the difference between pasting
+                        // and retyping.
+                        vm.connect { userCode, url ->
+                            clipboard.setText(AnnotatedString(userCode))
+                            openUrl(url)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Connect GitHub", fontWeight = FontWeight.SemiBold)
                 }
             }
@@ -130,20 +145,37 @@ private fun DisconnectedContent(vm: GitHubSyncViewModel, openUrl: (String) -> Un
             is ConnectPhase.Starting -> BusyRow("Contacting GitHub…")
 
             is ConnectPhase.AwaitingAuthorization -> {
+                // The code went to the clipboard when the browser was opened, so
+                // say "paste", not "enter" — GitHub always asks for it by hand.
                 Text(
-                    "Authorize in the browser that just opened, then come back. Enter this code if GitHub asks — tap to copy:",
+                    "Code copied. Paste it into the browser that just opened, authorize, " +
+                        "then come back. Tap to copy again:",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.size(12.dp))
-                Text(
-                    p.userCode,
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
+                var recopied by remember(p.userCode) { mutableStateOf(false) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { clipboard.setText(AnnotatedString(p.userCode)) },
-                )
+                        .clickable {
+                            clipboard.setText(AnnotatedString(p.userCode))
+                            recopied = true
+                        },
+                ) {
+                    Text(
+                        p.userCode,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        if (recopied) Icons.Default.Check else Icons.Default.ContentCopy,
+                        contentDescription = if (recopied) "Copied" else "Copy code",
+                        tint = if (recopied) BbAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Spacer(Modifier.size(12.dp))
                 BusyRow("Waiting for authorization…")
                 TextButton(onClick = { vm.cancelConnect() }) { Text("Cancel") }

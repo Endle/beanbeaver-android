@@ -40,7 +40,14 @@ object GitHubApp {
         val deviceCode: String,
         val userCode: String,
         val verificationUri: String,
-        /** GitHub's URL with the code pre-filled — open this so the user only taps "Authorize". */
+        /**
+         * RFC 8628's pre-filled URL, which would let the user only tap "Authorize".
+         * **GitHub does not send this** — its device-code response carries only
+         * `device_code`, `user_code`, `verification_uri`, `expires_in` and
+         * `interval` — so in practice this is always null and the user always has
+         * to enter the code by hand. Kept for spec compliance, but don't count on
+         * it: that is why the connect flow copies the code to the clipboard.
+         */
         val verificationUriComplete: String?,
         val interval: Int,
         val expiresIn: Int,

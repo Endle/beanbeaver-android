@@ -99,14 +99,21 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Connect flow
 
-    fun connect(openUrl: (String) -> Unit) {
+    /**
+     * [onCodeReady] receives the user code and the page to open, in that order,
+     * so the caller can put the code on the clipboard *before* the browser takes
+     * over the screen. GitHub always prompts for the code by hand — it does not
+     * implement RFC 8628's `verification_uri_complete` (see [GitHubApp.DeviceCode]),
+     * so arriving at the page with an empty clipboard means retyping it.
+     */
+    fun connect(onCodeReady: (userCode: String, url: String) -> Unit) {
         if (isBusyConnecting) return
         _connectPhase.value = ConnectPhase.Starting
         connectJob = viewModelScope.launch {
             try {
                 val device = GitHubApp.requestDeviceCode()
                 _connectPhase.value = ConnectPhase.AwaitingAuthorization(device.userCode)
-                openUrl(device.verificationUriComplete ?: device.verificationUri)
+                onCodeReady(device.userCode, device.verificationUriComplete ?: device.verificationUri)
                 val newToken = GitHubApp.pollForToken(device)
                 finishConnect(newToken)
             } catch (e: kotlinx.coroutines.CancellationException) {
