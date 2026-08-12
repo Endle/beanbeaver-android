@@ -178,6 +178,13 @@ private fun DisconnectedContent(vm: GitHubSyncViewModel, openUrl: (String) -> Un
                 }
                 Spacer(Modifier.size(12.dp))
                 BusyRow("Waiting for authorization…")
+                p.notice?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 TextButton(onClick = { vm.cancelConnect() }) { Text("Cancel") }
             }
 

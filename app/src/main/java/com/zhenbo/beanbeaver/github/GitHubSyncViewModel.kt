@@ -26,7 +26,8 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
     sealed interface ConnectPhase {
         data object Idle : ConnectPhase
         data object Starting : ConnectPhase
-        data class AwaitingAuthorization(val userCode: String) : ConnectPhase
+        /** [notice] is a non-fatal aside (e.g. GitHub unreachable) — the code stays valid. */
+        data class AwaitingAuthorization(val userCode: String, val notice: String? = null) : ConnectPhase
         data object VerifyingInstall : ConnectPhase
         data class NeedsInstall(val installUrl: String) : ConnectPhase
         data class Failed(val message: String) : ConnectPhase
@@ -114,7 +115,14 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
                 val device = GitHubApp.requestDeviceCode()
                 _connectPhase.value = ConnectPhase.AwaitingAuthorization(device.userCode)
                 onCodeReady(device.userCode, device.verificationUriComplete ?: device.verificationUri)
-                val newToken = GitHubApp.pollForToken(device)
+                val newToken = GitHubApp.pollForToken(device) { notice ->
+                    // Only ever decorates the awaiting screen — never replaces it,
+                    // or the user loses the code they are part-way through entering.
+                    val current = _connectPhase.value
+                    if (current is ConnectPhase.AwaitingAuthorization) {
+                        _connectPhase.value = current.copy(notice = notice)
+                    }
+                }
                 finishConnect(newToken)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _connectPhase.value = ConnectPhase.Idle

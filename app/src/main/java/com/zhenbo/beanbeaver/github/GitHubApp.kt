@@ -9,7 +9,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** A user-presentable failure from any GitHub call. Kotlin twin of iOS `FlowError`. */
-class GitHubException(message: String) : Exception(message)
+open class GitHubException(message: String) : Exception(message)
+
+/**
+ * The request never reached GitHub — DNS, no route, a dropped connection. Split
+ * out from [GitHubException] because it means something different to the caller:
+ * GitHub has not rejected anything, so a retry may well succeed. [pollForToken]
+ * relies on that to survive a flaky connection instead of tearing the whole
+ * device-flow down on one bad round trip.
+ */
+class GitHubTransportException(message: String) : GitHubException(message)
 
 /**
  * GitHub **App** Device Flow + the read-side REST calls, the Kotlin twin of iOS
@@ -25,6 +34,12 @@ class GitHubException(message: String) : Exception(message)
 object GitHubApp {
     /** Public GitHub App client ID — safe to ship (not a secret). */
     const val CLIENT_ID = "Iv23li8YKsK21kudOvAl"
+
+    /** Ceiling for the offline back-off in [pollForToken], in seconds. */
+    private const val MAX_OFFLINE_INTERVAL_SECONDS = 30
+
+    private const val CONNECT_TIMEOUT_MS = 15_000
+    private const val READ_TIMEOUT_MS = 20_000
 
     /** The app's public slug, for the install URL (github.com/apps/<slug>). */
     const val APP_SLUG = "beanbeaver-ios"
@@ -88,14 +103,33 @@ object GitHubApp {
      * denied). Returns the access token. The app uses non-expiring user tokens, so
      * the response carries only `access_token` (no refresh token to handle).
      */
-    suspend fun pollForToken(device: DeviceCode): String {
-        var interval = maxOf(device.interval, 1)
+    suspend fun pollForToken(
+        device: DeviceCode,
+        onReachability: (String?) -> Unit = {},
+    ): String {
+        val baseInterval = maxOf(device.interval, 1)
+        var interval = baseInterval
         val deadline = System.currentTimeMillis() + device.expiresIn * 1000L
+        var offlineFor = 0
         while (System.currentTimeMillis() < deadline) {
             delay(interval * 1000L)
             val body = "client_id=$CLIENT_ID&device_code=${device.deviceCode}" +
                 "&grant_type=urn:ietf:params:oauth:grant-type:device_code"
-            val json = postForm("https://github.com/login/oauth/access_token", body)
+            // A round trip that never reached GitHub is not an answer, so it must
+            // not end the flow: the user is mid-authorization in a browser and
+            // still needs the code this screen is showing. Keep polling until the
+            // code actually expires, backing off so a long outage isn't a tight
+            // retry loop, and let the caller say so on screen.
+            val json = try {
+                postForm("https://github.com/login/oauth/access_token", body).also {
+                    if (offlineFor > 0) { offlineFor = 0; interval = baseInterval; onReachability(null) }
+                }
+            } catch (e: GitHubTransportException) {
+                offlineFor++
+                interval = minOf(interval * 2, MAX_OFFLINE_INTERVAL_SECONDS)
+                onReachability("Can't reach GitHub — still trying. Your code is still valid.")
+                continue
+            }
 
             json.optString("access_token").ifEmpty { null }?.let { return it }
             when (json.optString("error").ifEmpty { null }) {
@@ -108,7 +142,10 @@ object GitHubApp {
                 else -> throw GitHubException(json.optString("error_description").ifEmpty { "GitHub error." })
             }
         }
-        throw GitHubException("Timed out waiting for authorization.")
+        throw GitHubException(
+            if (offlineFor > 0) "Gave up waiting — GitHub was unreachable. Check your connection and try again."
+            else "Timed out waiting for authorization.",
+        )
     }
 
     // MARK: - Step 3: installation + repo access
@@ -189,6 +226,12 @@ object GitHubApp {
         val conn = URL(urlString).openConnection() as HttpURLConnection
         val text: String = try {
             conn.requestMethod = method
+            // HttpURLConnection defaults to *no* timeout. An unreachable name
+            // fails fast (measured ~10 ms), but a connection that opens and then
+            // stalls would otherwise hang pollForToken's loop forever, and the
+            // loop is what keeps the user's code on screen.
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = READ_TIMEOUT_MS
             if (token != null) {
                 conn.setRequestProperty("Authorization", "Bearer $token")
                 conn.setRequestProperty("Accept", "application/vnd.github+json")
@@ -206,7 +249,7 @@ object GitHubApp {
             stream.bufferedReader().use { it.readText() }
         } catch (e: IOException) {
             val path = runCatching { URL(urlString).path }.getOrDefault("?")
-            throw GitHubException("GitHub $method $path failed: ${e.message}")
+            throw GitHubTransportException("GitHub $method $path failed: ${e.message}")
         } finally {
             conn.disconnect()
         }
