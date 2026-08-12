@@ -379,9 +379,12 @@ fun SettingsScreen(
 
             SettingsSection(
                 title = "About",
-                footer = "beanbeaver-core is the on-device scanning engine. Include both versions when reporting a scan issue.",
+                footer = "beanbeaver-core is the on-device scanning engine. Build is how this copy " +
+                    "captures a receipt: the ML Kit builds guide the shot, the FOSS builds take a " +
+                    "photo you already have. Include all three when reporting a scan issue.",
             ) {
                 LabeledRow("BeanBeaver", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                LabeledRow("Build", BuildConfig.DISTRIBUTION)
                 LabeledRow("beanbeaver-core", BuildConfig.CORE_VERSION)
             }
 
