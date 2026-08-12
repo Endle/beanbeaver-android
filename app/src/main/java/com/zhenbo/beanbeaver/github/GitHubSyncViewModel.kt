@@ -26,7 +26,8 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
     sealed interface ConnectPhase {
         data object Idle : ConnectPhase
         data object Starting : ConnectPhase
-        data class AwaitingAuthorization(val userCode: String) : ConnectPhase
+        /** [notice] is a non-fatal aside (e.g. GitHub unreachable) — the code stays valid. */
+        data class AwaitingAuthorization(val userCode: String, val notice: String? = null) : ConnectPhase
         data object VerifyingInstall : ConnectPhase
         data class NeedsInstall(val installUrl: String) : ConnectPhase
         data class Failed(val message: String) : ConnectPhase
@@ -99,15 +100,29 @@ class GitHubSyncViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Connect flow
 
-    fun connect(openUrl: (String) -> Unit) {
+    /**
+     * [onCodeReady] receives the user code and the page to open, in that order,
+     * so the caller can put the code on the clipboard *before* the browser takes
+     * over the screen. GitHub always prompts for the code by hand — it does not
+     * implement RFC 8628's `verification_uri_complete` (see [GitHubApp.DeviceCode]),
+     * so arriving at the page with an empty clipboard means retyping it.
+     */
+    fun connect(onCodeReady: (userCode: String, url: String) -> Unit) {
         if (isBusyConnecting) return
         _connectPhase.value = ConnectPhase.Starting
         connectJob = viewModelScope.launch {
             try {
                 val device = GitHubApp.requestDeviceCode()
                 _connectPhase.value = ConnectPhase.AwaitingAuthorization(device.userCode)
-                openUrl(device.verificationUriComplete ?: device.verificationUri)
-                val newToken = GitHubApp.pollForToken(device)
+                onCodeReady(device.userCode, device.verificationUriComplete ?: device.verificationUri)
+                val newToken = GitHubApp.pollForToken(device) { notice ->
+                    // Only ever decorates the awaiting screen — never replaces it,
+                    // or the user loses the code they are part-way through entering.
+                    val current = _connectPhase.value
+                    if (current is ConnectPhase.AwaitingAuthorization) {
+                        _connectPhase.value = current.copy(notice = notice)
+                    }
+                }
                 finishConnect(newToken)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _connectPhase.value = ConnectPhase.Idle
