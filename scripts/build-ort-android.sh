@@ -197,6 +197,16 @@ fi
 # It also makes the re2 workaround below moot -- with a shared library to link,
 # CMake finally has a reason to build re2 -- but that step is left in place
 # because it is a no-op once re2 exists and still load-bearing without --with-java.
+# XNNPACK is built unconditionally, for both consumers of this tree:
+#
+#   - the vendored DocQuad runner asks for it explicitly (and for NNAPI, which
+#     we deliberately do not build -- MakeACopy's own comment records a native
+#     SIGABRT during NNAPI graph partitioning; the request is caught and falls
+#     back to CPU);
+#   - ocr-paddle registers no execution provider on Android today, so PP-OCRv5
+#     runs on the plain CPU EP while iOS gets CoreML. Compiling XNNPACK in is
+#     the prerequisite for closing that gap in core; it does not close it by
+#     itself, because core must also register the EP.
 JAVA_BUILD_FLAGS=""
 if [ "$WITH_JAVA" = 1 ]; then
   JAVA_BUILD_FLAGS="--build_shared_lib --build_java"
@@ -217,6 +227,7 @@ python3 "$ORT_SRC/tools/ci_build/build.py" \
   --android_abi "$ANDROID_ABI" \
   --android_api "$ANDROID_API" \
   --android_cpp_shared \
+  --use_xnnpack \
   $JAVA_BUILD_FLAGS \
   --skip_tests \
   --skip_submodule_sync \

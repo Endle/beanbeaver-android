@@ -22,3 +22,16 @@
 # not these, so without them a retraced crash has method names and no lines.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# ONNX Runtime's Java bindings (foss flavour, for the DocQuad corner detector).
+#
+# Its native side resolves Java classes by *name* through JNI FindClass, which
+# R8 cannot see, so without this it renames them and the lookups return null.
+# The failure is nastier than a missing class: OrtSession$SessionOptions.addNnapi
+# fails (we build ORT without NNAPI), the native code tries to raise an
+# OrtException, FindClass("ai/onnxruntime/OrtException") returns null, and
+# GetMethodID on null is a hard JNI abort — the process dies with no Java stack
+# and nothing in the crash buffer. Measured on an SM-X218U: reason=5
+# APP CRASH(NATIVE) on every tap of Scan, while assembleFossDebug stayed green
+# because debug builds never run R8.
+-keep class ai.onnxruntime.** { *; }
