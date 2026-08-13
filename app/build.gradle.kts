@@ -65,7 +65,7 @@ val coreVersion: String = run {
 // document-scanner module is delivered and updated by Play services on the
 // device (see PRIVACY.md), so this pins what BeanBeaver was compiled against —
 // which is the half we control and the half a build report needs.
-val mlKitDocumentScannerVersion = "16.0.0-beta1"
+val mlKitDocumentScannerVersion = "16.0.0"
 
 val syncOcrModels by tasks.registering(Copy::class) {
     description = "Copy PP-OCRv5 ONNX models into app assets"
