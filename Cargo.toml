@@ -59,7 +59,7 @@ path = "shared/src/bin/batch_e2e.rs"
 # symbol changes. The parse content is core #62: QUAIL no longer claims QUALITY,
 # and Frozen/Dim Sum department items classify.
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9.0" }
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9.1" }
 # The library the app actually loads. It re-exports nothing and is called only
 # through the generated Kotlin; the dependency exists so `cargo build -p
 # bb-mobile-ffi` produces libbb_mobile_ffi.so, which carries BOTH uniffi
@@ -71,7 +71,15 @@ bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9
 # direct bb-receipt-ffi dep is only here for shared/src/bin/batch_e2e.rs, which
 # uses the core's Rust API. Cargo.lock is committed — a duplicate
 # bb-receipt-ffi entry there is the tell.
-bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.1" }
+# NOT yet carrying features = ["xnnpack"], though core v0.9.1 and
+# bb-mobile-ffi v0.1.2 both offer it and scripts/build-ort-android.sh builds ORT
+# with --use_xnnpack. Enabling it fails at link with hundreds of undefined
+# hidden `xnn_*` microkernel symbols: ort-sys does not add XNNPACK's kernel
+# archives to the link line, the same shape as the re2 trap in
+# build-ort-android.sh. Until that is solved, PP-OCRv5 stays on the plain CPU
+# EP here (MLAS -- NEON, but CPU) while iOS uses CoreML. Measured on an
+# SM-X218U: det 1088 ms, rec 3573 ms, 5426 ms wall for one receipt.
+bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.2" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }
