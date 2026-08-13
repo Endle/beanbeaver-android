@@ -381,11 +381,18 @@ fun SettingsScreen(
                 title = "About",
                 footer = "beanbeaver-core is the on-device scanning engine. Build is how this copy " +
                     "captures a receipt: the ML Kit builds guide the shot, the FOSS builds take a " +
-                    "photo you already have. Include all three when reporting a scan issue.",
+                    "photo you already have. ML Kit is the version this build was compiled " +
+                    "against; Play services supplies the scanner itself and updates it " +
+                    "separately. Include everything here when reporting a scan issue.",
             ) {
                 LabeledRow("BeanBeaver", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 LabeledRow("Build", BuildConfig.DISTRIBUTION)
                 LabeledRow("beanbeaver-core", BuildConfig.CORE_VERSION)
+                // Absent on foss, which links no ML Kit — an empty row would
+                // invite the reader to wonder what the blank means.
+                if (BuildConfig.MLKIT_VERSION.isNotEmpty()) {
+                    LabeledRow("ML Kit scanner", BuildConfig.MLKIT_VERSION)
+                }
             }
 
             // Directly under About, so the two read as one move: the versions to
@@ -393,7 +400,7 @@ fun SettingsScreen(
             SettingsSection(
                 title = "Feedback",
                 footer = "Questions, bugs, and receipts that came out wrong — whichever room suits " +
-                    "you. When it's a scan problem, include the two versions above.",
+                    "you. When it's a scan problem, include the versions from About above.",
             ) {
                 FEEDBACK_ROOMS.forEachIndexed { i, room ->
                     if (i > 0) Spacer(Modifier.size(8.dp))

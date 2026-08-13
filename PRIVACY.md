@@ -1,6 +1,6 @@
 # BeanBeaver — Privacy Policy
 
-_Last updated: 2026-08-09_
+_Last updated: 2026-08-13_
 
 BeanBeaver ("the app") turns photos of grocery receipts into itemized,
 Beancount-formatted text **entirely on your device**. This policy explains what
@@ -8,21 +8,29 @@ the app does and does not do with your information.
 
 ## Data we collect
 
-**None.** BeanBeaver does not collect, transmit, sell, or share any personal or
-financial information. The app has no account system, no analytics, no
-advertising, and no server component.
+**None.** BeanBeaver does not collect, sell, or share any personal or financial
+information, and sends nothing to its developer. There is no account system, no
+analytics, no advertising, and no BeanBeaver server — there is nothing for your
+data to be sent to. The one case where the app transmits anything at all is an
+export you set up and start yourself, described below.
 
 ## How your data is processed
 
 - **On-device only.** Receipt images you pick (or capture with the document
   scanner) are processed locally: optical character recognition (OCR), parsing,
   and categorization all run on your phone using models bundled inside the app.
-- **No network transmission.** The app requests no Internet permission. Receipt
-  images and their extracted contents never leave your device through BeanBeaver.
+- **Network use, and its one purpose.** Scanning, parsing and categorization
+  never touch the network. BeanBeaver does hold the Internet permission, for a
+  single feature: **GitHub sync**, which you have to configure before it can do
+  anything. Once you have connected a repository and filed a receipt, the app
+  uploads *that receipt* to *your* repository — its Beancount text, its parsed
+  `.json`, and the receipt image itself — over an authorization you granted to
+  your own GitHub account. Receipts you do not file are never uploaded, and
+  nothing is ever sent anywhere else.
 - **Images.** Photos are read from the images you explicitly select via the
-  Android photo picker, or captured through Google Play services' document
-  scanner. BeanBeaver does not access your photo library beyond the specific
-  images you choose — it cannot read what is already in it.
+  Android photo picker, or — in the Play build — captured through Google Play
+  services' document scanner. BeanBeaver does not access your photo library
+  beyond the specific images you choose — it cannot read what is already in it.
 - **Saving a photo back to your library.** If you use **"Save to Camera Roll"**
   (Receipts → a receipt → the ⋮ menu), a copy of that one receipt's photo is
   written to your photo library, under a "BeanBeaver" album. That copy sits
@@ -36,21 +44,40 @@ advertising, and no server component.
 
 ## Third-party components
 
-The in-app document scanner is provided by **Google Play services (ML Kit)**.
-When first used, Google Play services may download the scanner module; that
-download is handled by Google Play services, not by BeanBeaver, and is governed
-by [Google's Privacy Policy](https://policies.google.com/privacy).
+BeanBeaver comes in two builds, and only one of them contains any Google code.
+Settings > About tells you which you are running.
+
+**The Play build.** Its in-app document scanner is provided by **Google Play
+services (ML Kit)**. When first used, Google Play services may download the
+scanner module; that download is handled by Google Play services, not by
+BeanBeaver, and is governed by
+[Google's Privacy Policy](https://policies.google.com/privacy).
+
+ML Kit is used for **the document-capture screen and nothing else** — it frames
+and straightens the photo you are taking. It does not read your receipt. All
+text recognition, parsing and categorization are BeanBeaver's own, running
+offline on models bundled in the app, and no other ML Kit or Google Play
+services feature is included.
+
+**The F-Droid build** contains no Google Play services code at all. It replaces
+that one screen with the Android photo picker; everything after the photo is
+identical.
 
 ## Permissions
 
-- **Camera** _(optional)_: only if you use the document scanner to capture a
-  receipt. Photos picked from your library need no camera access.
+- **Internet**: used only by GitHub sync, as described above. BeanBeaver requests
+  it even in builds you never connect to GitHub, because a permission is declared
+  once for the whole app rather than granted per feature.
+- **Camera** _(optional)_: in the Play build, the document scanner's capture
+  screen belongs to Google Play services and runs under its own permissions, so
+  BeanBeaver itself does not request camera access. Photos picked from your
+  library need none either.
 
 "Save to Camera Roll" needs no permission at all: BeanBeaver adds the photo
 through Android's own media store, which lets an app create entries it owns
 without granting it any view of the rest of your library.
 
-BeanBeaver requests no Internet, location, contacts, or account permissions.
+BeanBeaver requests no location, contacts, or account permissions.
 
 ## Children's privacy
 

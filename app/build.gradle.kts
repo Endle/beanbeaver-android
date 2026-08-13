@@ -56,6 +56,17 @@ val coreVersion: String = run {
     }
 }
 
+// Declared once and used twice — the dependency coordinate below and the About
+// row's buildConfigField. Same reason coreVersion is derived rather than typed:
+// a version a user quotes in a bug report is worthless if it can drift from the
+// artifact actually linked, and two hand-maintained literals always drift.
+//
+// Note this is the *client library* version, not the scanner itself. The
+// document-scanner module is delivered and updated by Play services on the
+// device (see PRIVACY.md), so this pins what BeanBeaver was compiled against —
+// which is the half we control and the half a build report needs.
+val mlKitDocumentScannerVersion = "16.0.0"
+
 val syncOcrModels by tasks.registering(Copy::class) {
     description = "Copy PP-OCRv5 ONNX models into app assets"
     from(modelsDir) {
@@ -155,10 +166,18 @@ android {
             // capture engine, because that is the whole difference and it is
             // what a scan report needs to disambiguate.
             buildConfigField("String", "DISTRIBUTION", "\"ML Kit (Play services)\"")
+            // The ML Kit client library this build was compiled against. Declared
+            // in both flavours because SettingsScreen lives in `main` and is
+            // compiled for each — a field defined in only one flavour is a
+            // missing symbol in the other, not a fallback.
+            buildConfigField("String", "MLKIT_VERSION", "\"$mlKitDocumentScannerVersion\"")
         }
         create("foss") {
             dimension = "distribution"
             buildConfigField("String", "DISTRIBUTION", "\"FOSS (photo picker)\"")
+            // Empty, not "none": this build links no ML Kit at all, and the About
+            // row is hidden rather than answered. fdroid.yml asserts the absence.
+            buildConfigField("String", "MLKIT_VERSION", "\"\"")
         }
     }
 
@@ -336,7 +355,7 @@ dependencies {
     // `full` only — this single line is the entire reason the foss flavour exists.
     // The foss source set supplies its own rememberDocumentScanLauncher backed by
     // the system photo picker, so nothing else in the app knows the difference.
-    "fullImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
+    "fullImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:$mlKitDocumentScannerVersion")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

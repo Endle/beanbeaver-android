@@ -49,14 +49,34 @@ Apache License 2.0 except where noted; the full text appears below.
     AndroidX (core-ktx, activity-compose, activity-ktx, lifecycle-*)
     Jetpack Compose (ui, material3, material-icons-extended) via Compose BOM
     Kotlin standard library and kotlinx-coroutines — JetBrains, Apache-2.0
-    Google Play services ML Kit document scanner
-        (com.google.android.gms:play-services-mlkit-document-scanner)
 
     Java Native Access (JNA), pulled in by the UniFFI Kotlin bindings
     Copyright (c) Java Native Access contributors
     Dual-licensed: Apache License 2.0 or LGPL 2.1+ — BeanBeaver relies on the
     Apache-2.0 option.
     https://github.com/java-native-access/jna
+
+### Google Play services — the Play build only
+
+BeanBeaver is published in two builds, and they do not carry the same
+dependencies. Settings > About names which one you are running.
+
+    Google Play services ML Kit document scanner — Apache-2.0
+        (com.google.android.gms:play-services-mlkit-document-scanner 16.0.0)
+
+**Play build only.** It is the app's sole Google Play services dependency, and it
+is used for one thing: the guided document-capture screen. No other ML Kit or
+Play services component is bundled — text recognition, parsing and
+categorization are BeanBeaver's own, running on the PP-OCRv5 models above.
+
+**The F-Droid build contains no Google Play services code at all.** It replaces
+that one screen with the system photo picker, and its build is gated on the
+absence: the release process fails if any `com.google.android.gms` reference
+survives into it. Nothing else differs between the two.
+
+Note that the library above is a client for a scanner module that Google Play
+services delivers and updates on the device, so the version recorded here is
+what BeanBeaver was compiled against rather than the code that ultimately runs.
 
 ---
 
