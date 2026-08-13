@@ -14,6 +14,14 @@ import java.util.UUID
  * scans one receipt at a time, so there's nothing to spill to disk.)
  */
 object ReceiptCaptureStore {
+    /**
+     * What every capture filename starts with. Load-bearing, not cosmetic: this
+     * directory is shared with `spend.json`, `batch.json` and `item_rules.json`,
+     * so anything totalling or sweeping "the photos" has to filter on it. iOS
+     * spells the same constant `filenamePrefix` for the same reason.
+     */
+    const val FILENAME_PREFIX = "receipt_capture_"
+
     fun directory(context: Context): File =
         File(context.filesDir, "captures").apply { mkdirs() }
 
@@ -22,11 +30,19 @@ object ReceiptCaptureStore {
 
     /** A fresh, collision-free capture file (its bytes not yet written). */
     fun newCaptureFile(context: Context): File =
-        File(directory(context), "receipt_capture_${UUID.randomUUID()}.jpg")
+        File(directory(context), "$FILENAME_PREFIX${UUID.randomUUID()}.jpg")
 
-    /** How much disk every kept receipt photo is using, for the Settings row. */
+    /**
+     * Bytes used by capture JPEGs on disk, orphans from failed scans included.
+     *
+     * Not what the Settings row shows — that is [SpendStore.totalPhotoBytes],
+     * which counts only photos a kept receipt still points at. The two differ by
+     * exactly the orphaned captures, and iOS draws the same distinction.
+     */
     fun totalBytes(context: Context): Long =
-        directory(context).listFiles()?.sumOf { it.length() } ?: 0L
+        directory(context).listFiles()
+            ?.filter { it.name.startsWith(FILENAME_PREFIX) }
+            ?.sumOf { it.length() } ?: 0L
 
     // There was a `clearOld(keeping:)` sweep here, deleting every capture except
     // the ones a live screen or a pending batch still needed. It is gone, and the

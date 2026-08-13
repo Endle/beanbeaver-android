@@ -56,7 +56,6 @@ import com.zhenbo.beanbeaver.export.LedgerFileOptions
 import com.zhenbo.beanbeaver.export.MoneyManagerExport
 import com.zhenbo.beanbeaver.receipt.BudgetPrefs
 import com.zhenbo.beanbeaver.receipt.LedgerFormatPrefs
-import com.zhenbo.beanbeaver.receipt.ReceiptCaptureStore
 import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.ui.theme.groupedBackground
 
@@ -96,7 +95,13 @@ fun SettingsScreen(
     val spendRecords by SpendStore.records.collectAsStateWithLifecycle()
     val hideAmounts by AmountPrivacy.hideAmounts.collectAsStateWithLifecycle()
     // Recomputed as records change, so clearing photos updates the row in place.
-    val capturedBytes = remember(spendRecords) { ReceiptCaptureStore.totalBytes(context) }
+    //
+    // [SpendStore.totalPhotoBytes], not [ReceiptCaptureStore.totalBytes]: the
+    // captures directory also holds spend.json, batch.json and item_rules.json,
+    // so summing the whole directory reported those as "Receipt photos". Walking
+    // the records instead counts only photos that a kept receipt still points at,
+    // which is what the row claims and what iOS's twin does.
+    val capturedBytes = remember(spendRecords) { SpendStore.totalPhotoBytes(context) }
     val budgetRoots = remember { BudgetPrefs.declaredRoots(context) }
     var budgetRoot by remember { mutableStateOf(BudgetPrefs.root(context)) }
     var budgetAmount by remember {

@@ -443,6 +443,24 @@ git -C ~/src/bb/beanbeaver-ios log --oneline --since=<fork date>
 Everything iOS committed after that date is the port backlog. iOS commit
 subjects carry the feature name; port them one commit at a time.
 
+**Pair the features, not the implementations.** What has to match is the
+*behaviour a user can see* — a feature that exists on one app is expected on the
+other, and should read the same way. How it is built is each platform's own
+business: idiomatic Compose and idiomatic SwiftUI are not the same shape, and
+forcing one into the other's structure buys nothing. So a divergence in
+implementation is not a defect and does not need a justification.
+
+That said, **less divergence is better where it is free**. Same names for the
+same concept, same file split, same constants, same ordering — those make the
+next port a diff instead of a rediscovery, which is most of what the table below
+is for. Prefer the shared shape when the platforms don't push back; drop it the
+moment they do.
+
+**`versionName` tracks iOS's `MARKETING_VERSION`.** Same product, so a version
+in a bug report should not need a platform to disambiguate it. `versionCode` is
+Play's own monotonic counter and has no iOS twin — bump it independently, and
+never reuse one (see the burned-code comment in `app/build.gradle.kts`).
+
 **Where each iOS feature lives here.**
 
 | iOS (`BeanBeaver/BeanBeaver/…`) | Android twin |
@@ -466,7 +484,11 @@ subjects carry the feature name; port them one commit at a time.
 (`-dumpSpending`, `-showAmounts`, `-scrollToDebug`, `-showBatchImport`) — Android
 has no process-args convention; use logcat and `scripts/` instead. The
 Files-inbox ledger destination is commented out on iOS too, so Android has no
-twin by design. iOS's CI ORT-cache self-heal is iOS-specific. `PhotoSaver`'s
+twin by design. iOS's CI ORT-cache *self-heal* is iOS-specific — but note that
+the **single-entry cache** it sits on is not, and is now ported: both jobs in
+`android-build.yml` use one `actions/cache@v4` covering the cargo dirs, `target`
+and `~/.cache/ort.pyke.io` under one key, with no `Swatinem/rust-cache`. Read
+that step's comment before splitting them again. `PhotoSaver`'s
 `notAuthorized` failure has no twin either: a scoped-storage MediaStore insert
 needs no runtime permission at minSdk 34, so there is nothing to refuse.
 
