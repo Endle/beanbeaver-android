@@ -347,6 +347,27 @@ dependencies {
     "fossImplementation"("androidx.camera:camera-lifecycle:$cameraX")
     "fossImplementation"("androidx.camera:camera-view:$cameraX")
 
+    // ONNX Runtime's *Java* bindings, foss only, for the vendored DocQuad code.
+    //
+    // This is a second ONNX Runtime in the app, and deliberately so. The parse
+    // core links ORT statically inside libbb_mobile_ffi.so, which exports 226
+    // dynamic symbols, none of them ORT's — so the two cannot bind to each
+    // other, and sharing one runtime between Rust and Java would trade that
+    // encapsulation for a saving we chose not to take.
+    //
+    // Both come out of one compile: scripts/build-ort-android.sh with
+    // --build_shared_lib --build_java emits the ten libonnxruntime_*.a the Rust
+    // link consumes *and* the .so/.jar here. F-Droid therefore still builds ORT
+    // from source exactly once.
+    "fossImplementation"(files("src/foss/libs/onnxruntime.jar"))
+
+    // Lombok, for the vendored MakeACopy DocQuad sources only — two of them are
+    // annotated @UtilityClass. Adding the processor rather than deleting the
+    // annotation is deliberate: it is what lets app/src/foss/java/de/schliweb/**
+    // stay byte-identical to upstream (see that tree's BuildConfig shim).
+    "fossCompileOnly"("org.projectlombok:lombok:1.18.34")
+    "fossAnnotationProcessor"("org.projectlombok:lombok:1.18.34")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Plain JVM unit tests (./gradlew :app:testDebugUnitTest) — no emulator, no
