@@ -62,17 +62,31 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      # `ort` downloads a prebuilt libonnxruntime into this cache — once for the
-      # aarch64-linux-android .so, once for the host batch_e2e binary.
-      - name: Cache ONNX Runtime
+      # Cargo registry/git + build outputs, *plus* the prebuilt libonnxruntime
+      # that `ort` downloads to ~/.cache/ort.pyke.io — once for the
+      # aarch64-linux-android .so, once for the host batch_e2e binary. Keyed on
+      # Cargo.lock so it busts when deps change.
+      #
+      # These MUST stay one entry, and this is why Swatinem/rust-cache is not
+      # used here. They were two (rust-cache for target/, a separate
+      # actions/cache for the ORT dir) and that is exactly the pairing that
+      # wedged beanbeaver-ios's main branch — fixed there in ios #57, ported
+      # here. A restored target/ marks ort-sys's build script as already run, so
+      # the download that would refill the ORT dir never fires, and nothing else
+      # can produce that archive; the build then fails on a missing
+      # libonnxruntime with no hint that a cache is at fault. Independent
+      # eviction makes that reachable, and Actions evicts by size and age. One
+      # entry makes a hit on one impossible without the other.
+      - name: Cache cargo + ONNX Runtime
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ort.pyke.io
-          key: ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ort-${{ runner.os }}-
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            ~/.cache/ort.pyke.io
+          key: cargo-ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-ort-${{ runner.os }}-
 
       # ~19 MB of ONNX weights pulled from a fixed release tag, so the key only
       # has to change when the script points at a different release.
@@ -190,15 +204,18 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Cache ONNX Runtime
+      # One entry, same reason as the build job above: target/ and the ORT
+      # download directory must be restored together or not at all.
+      - name: Cache cargo + ONNX Runtime
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ort.pyke.io
-          key: ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ort-${{ runner.os }}-
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            ~/.cache/ort.pyke.io
+          key: cargo-ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-ort-${{ runner.os }}-
 
       - name: Cache OCR models
         uses: actions/cache@v4
