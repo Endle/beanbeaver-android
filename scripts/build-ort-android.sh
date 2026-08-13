@@ -22,7 +22,14 @@ set -euo pipefail
 ANDROID_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PRINT_ONLY=0
-[ "${1:-}" = "--print-lib-location" ] && PRINT_ONLY=1
+WITH_JAVA=0
+for arg in "$@"; do
+  case "$arg" in
+    --print-lib-location) PRINT_ONLY=1 ;;
+    --with-java)          WITH_JAVA=1 ;;
+  esac
+done
+[ -n "${ORT_BUILD_JAVA:-}" ] && WITH_JAVA=1
 
 # In --print-lib-location mode the only thing on real stdout is the final path,
 # so `$(...)` is usable even on a cold build. fd 3 keeps a handle on the real
@@ -41,6 +48,9 @@ ANDROID_API="${ANDROID_API:-34}"
 ORT_BUILD_DIR="${ORT_BUILD_DIR:-$ANDROID_ROOT/target/ort}"
 ORT_SRC="$ORT_BUILD_DIR/src"
 ORT_OUT="$ORT_BUILD_DIR/build-$ANDROID_ABI"
+# --with-java is a different CMake configuration, so it gets its own tree rather
+# than invalidating the Rust-only one every time the flag is toggled.
+[ "$WITH_JAVA" = 1 ] && ORT_OUT="$ORT_BUILD_DIR/build-java-$ANDROID_ABI"
 
 # --- which ONNX Runtime version -------------------------------------------
 #
@@ -175,7 +185,42 @@ fi
 # --android_cpp_shared matches ort-sys, which emits `-l c++_shared` for Android
 # targets (see static_link_prerequisites). Letting ORT default to the static
 # libc++ here would put two C++ runtimes in one process.
+# --with-java additionally emits ONNX Runtime's Java bindings, which the foss
+# flavour's vendored DocQuad corner detector calls through `ai.onnxruntime`.
+#
+# It is the SAME compile, not a second one: --build_shared_lib still produces
+# the ten libonnxruntime_*.a that ort-sys links, and pointing
+# ORT_ANDROID_LIB_LOCATION at this tree was measured to keep onnxruntime
+# statically linked into libbb_mobile_ffi.so (no DT_NEEDED) even with a
+# libonnxruntime.so sitting beside them. So F-Droid builds ORT once, not twice.
+#
+# It also makes the re2 workaround below moot -- with a shared library to link,
+# CMake finally has a reason to build re2 -- but that step is left in place
+# because it is a no-op once re2 exists and still load-bearing without --with-java.
+# XNNPACK rides with --with-java, and only there. The vendored DocQuad runner
+# asks for it explicitly, and that path uses this shared build.
+#
+# It must NOT go on the static (Rust-only) build: with
+# onnxruntime_BUILD_SHARED_LIB=OFF, onnxruntime_USE_XNNPACK=ON fails at CMake
+# generate with a wall of `install(EXPORT "onnxruntimeTargets") includes target
+# "onnxruntime" which requires target "absl_*" that is not in any export set`.
+# Adding it unconditionally broke the previously-green fdroid-ort-from-source
+# job, which builds exactly that configuration.
+#
+# Nothing is lost: ocr-paddle CAN now register XNNPACK (core v0.9.1), but
+# enabling that feature fails at link with undefined hidden xnn_* microkernel
+# symbols -- ort-sys does not add XNNPACK's kernel archives -- so the Rust side
+# has no use for it yet either way. NNAPI is deliberately never built; the
+# DocQuad runner catches its absence and falls back to CPU.
+JAVA_BUILD_FLAGS=""
+if [ "$WITH_JAVA" = 1 ]; then
+  JAVA_BUILD_FLAGS="--build_shared_lib --build_java --use_xnnpack"
+  command -v javac >/dev/null 2>&1 || {
+    echo "error: --with-java needs a JDK on PATH (JAVA_HOME/bin)." >&2; exit 1; }
+fi
+
 echo ">> building (several minutes; ~3.5 min on a 10-core M-series, longer on CI)"
+set +e
 python3 "$ORT_SRC/tools/ci_build/build.py" \
   --build_dir "$ORT_OUT" \
   --config Release \
@@ -187,14 +232,49 @@ python3 "$ORT_SRC/tools/ci_build/build.py" \
   --android_abi "$ANDROID_ABI" \
   --android_api "$ANDROID_API" \
   --android_cpp_shared \
+  $JAVA_BUILD_FLAGS \
   --skip_tests \
   --skip_submodule_sync \
   --compile_no_warning_as_error \
   --cmake_extra_defines onnxruntime_BUILD_UNIT_TESTS=OFF
 
+BUILD_RC=$?
+set -e
+
+# --with-java's last step packages an Android AAR using ONNX Runtime's own
+# java/build-android.gradle, which is pinned to AGP 7.4.2 and dies under JDK 21
+# in AGP's JdkImageTransform (jlink). We do not consume the AAR -- the jar plus
+# the two .so files below is the whole integration -- so a failure *there* is
+# not a failure here. Rather than ignore the exit code blindly, everything we
+# actually need is asserted immediately after.
+if [ "$BUILD_RC" != 0 ] && [ "$WITH_JAVA" != 1 ]; then
+  echo "error: ONNX Runtime build failed (exit $BUILD_RC)" >&2
+  exit "$BUILD_RC"
+fi
+
 if [ ! -f "$LIB_LOCATION/libonnxruntime_common.a" ]; then
   echo "error: no libonnxruntime_common.a in $LIB_LOCATION" >&2
   exit 1
+fi
+
+if [ "$WITH_JAVA" = 1 ]; then
+  ORT_JAR="$LIB_LOCATION/java/build/libs/onnxruntime.jar"
+  for artifact in \
+    "$LIB_LOCATION/libonnxruntime.so" \
+    "$LIB_LOCATION/libonnxruntime4j_jni.so" \
+    "$ORT_JAR"; do
+    if [ ! -f "$artifact" ]; then
+      echo "error: --with-java produced no $(basename "$artifact")" >&2
+      echo "  (build.py exited $BUILD_RC; that is tolerated only when the" >&2
+      echo "   jar and both .so files exist -- see the note above)" >&2
+      exit 1
+    fi
+  done
+  echo ">> java bindings:"
+  echo "     $ORT_JAR"
+  echo "     $LIB_LOCATION/libonnxruntime.so"
+  echo "     $LIB_LOCATION/libonnxruntime4j_jni.so"
+  echo "   install into app/src/foss/libs/ and app/src/foss/jniLibs/$ANDROID_ABI/"
 fi
 
 # re2 is EXCLUDE_FROM_ALL, and with --build_shared_lib off and unit tests off

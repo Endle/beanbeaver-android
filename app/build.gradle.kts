@@ -136,8 +136,8 @@ android {
     // services dependency removed, which is a hard requirement for F-Droid — its
     // inclusion policy names GMS as not accepted, and asks for a flavour without
     // it when the app can work in some capacity without it. Here it can: the only
-    // GMS user is the ML Kit document scanner, and the photo-picker capture path
-    // is already the primary way receipts get in.
+    // GMS user is the ML Kit document scanner, and foss replaces it with its own
+    // CameraX capture (batch import's picker was never GMS-backed in either).
     //
     // Same applicationId on purpose. It is one app on two stores, not two apps,
     // and F-Droid only requires the id be unique to the project.
@@ -158,7 +158,7 @@ android {
         }
         create("foss") {
             dimension = "distribution"
-            buildConfigField("String", "DISTRIBUTION", "\"FOSS (photo picker)\"")
+            buildConfigField("String", "DISTRIBUTION", "\"FOSS (in-app camera)\"")
         }
     }
 
@@ -335,8 +335,38 @@ dependencies {
     //
     // `full` only — this single line is the entire reason the foss flavour exists.
     // The foss source set supplies its own rememberDocumentScanLauncher backed by
-    // the system photo picker, so nothing else in the app knows the difference.
+    // its own CameraX capture, so nothing else in the app knows the difference.
     "fullImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
+
+    // In-app capture, `foss` only — this flavour's replacement for the ML Kit
+    // scanner above. Scoped to the flavour for the same reason that line is:
+    // the Play build must not grow a second camera stack it never uses.
+    val cameraX = "1.4.1"
+    "fossImplementation"("androidx.camera:camera-core:$cameraX")
+    "fossImplementation"("androidx.camera:camera-camera2:$cameraX")
+    "fossImplementation"("androidx.camera:camera-lifecycle:$cameraX")
+    "fossImplementation"("androidx.camera:camera-view:$cameraX")
+
+    // ONNX Runtime's *Java* bindings, foss only, for the vendored DocQuad code.
+    //
+    // This is a second ONNX Runtime in the app, and deliberately so. The parse
+    // core links ORT statically inside libbb_mobile_ffi.so, which exports 226
+    // dynamic symbols, none of them ORT's — so the two cannot bind to each
+    // other, and sharing one runtime between Rust and Java would trade that
+    // encapsulation for a saving we chose not to take.
+    //
+    // Both come out of one compile: scripts/build-ort-android.sh with
+    // --build_shared_lib --build_java emits the ten libonnxruntime_*.a the Rust
+    // link consumes *and* the .so/.jar here. F-Droid therefore still builds ORT
+    // from source exactly once.
+    "fossImplementation"(files("src/foss/libs/onnxruntime.jar"))
+
+    // Lombok, for the vendored MakeACopy DocQuad sources only — two of them are
+    // annotated @UtilityClass. Adding the processor rather than deleting the
+    // annotation is deliberate: it is what lets app/src/foss/java/de/schliweb/**
+    // stay byte-identical to upstream (see that tree's BuildConfig shim).
+    "fossCompileOnly"("org.projectlombok:lombok:1.18.34")
+    "fossAnnotationProcessor"("org.projectlombok:lombok:1.18.34")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

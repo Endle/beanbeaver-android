@@ -28,3 +28,10 @@
 *.iml
 .idea/
 .DS_Store
+
+# foss in-app camera: DocQuadNet weights and the ONNX Runtime *Java* bindings.
+# Same rule as the PP-OCRv5 models and bbreceiptkit's jniLibs above — binaries
+# are built or fetched, never committed, so F-Droid can build from source.
+/app/src/foss/assets/docquad/
+/app/src/foss/jniLibs/
+/app/src/foss/libs/
