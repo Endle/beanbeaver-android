@@ -63,7 +63,6 @@ import de.schliweb.makeacopy.ml.corners.BbDocQuad
 import de.schliweb.makeacopy.ml.corners.CornerDetector
 import de.schliweb.makeacopy.ml.corners.DetectionResult
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -137,7 +136,19 @@ private fun CaptureFlow(onConfirm: (File) -> Unit, onCancel: () -> Unit) {
     }
     var denied by remember { mutableStateOf(false) }
     var shot by remember { mutableStateOf<Shot?>(null) }
-    var working by remember { mutableStateOf(false) }
+    var captured by remember { mutableStateOf<File?>(null) }
+    val working = captured != null && shot == null
+
+    // The crop must NOT run on a scope owned by CameraPreview. Setting `captured`
+    // takes CameraPreview out of the composition, which cancels any scope it
+    // remembered -- so a job launched there dies mid-crop and the screen sits on
+    // "Finding the receipt…" forever. Observed exactly that on an SM-X218U.
+    // CaptureFlow stays composed for the whole activity, so its LaunchedEffect
+    // survives the transition.
+    LaunchedEffect(captured) {
+        val file = captured ?: return@LaunchedEffect
+        shot = withContext(Dispatchers.IO) { cropCaptured(context, file) }
+    }
 
     val askPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -153,21 +164,11 @@ private fun CaptureFlow(onConfirm: (File) -> Unit, onCancel: () -> Unit) {
 
         shot != null -> ReviewShot(
             shot = shot!!,
-            onRetake = { shot!!.file.delete(); shot = null },
+            onRetake = { shot!!.file.delete(); shot = null; captured = null },
             onUse = { onConfirm(shot!!.file) },
         )
 
-        granted -> CameraPreview(
-            onCaptured = { file, scope ->
-                working = true
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) { cropCaptured(context, file) }
-                    shot = result
-                    working = false
-                }
-            },
-            onCancel = onCancel,
-        )
+        granted -> CameraPreview(onCaptured = { captured = it }, onCancel = onCancel)
 
         denied -> PermissionRefused(onCancel = onCancel, onRetry = {
             denied = false
@@ -191,12 +192,11 @@ private fun Busy() {
 
 @Composable
 private fun CameraPreview(
-    onCaptured: (File, kotlinx.coroutines.CoroutineScope) -> Unit,
+    onCaptured: (File) -> Unit,
     onCancel: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
     // One background thread for inference: STRATEGY_KEEP_ONLY_LATEST means a slow
     // frame is dropped rather than queued, so a single worker cannot fall behind.
@@ -220,9 +220,10 @@ private fun CameraPreview(
     var busy by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
-        val detector: CornerDetector? = runCatching { BbDocQuad.forPreview(context) }
-            .onFailure { Log.e(CameraCaptureActivity.TAG, "no preview detector", it) }
-            .getOrNull()
+        // Built on the analysis thread, not here: BbDocQuad.forPreview loads the
+        // 13 MB ONNX session, and DisposableEffect runs on the main thread.
+        val detectorRef = java.util.concurrent.atomic.AtomicReference<CornerDetector?>(null)
+        val detectorTried = java.util.concurrent.atomic.AtomicBoolean(false)
 
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -231,7 +232,16 @@ private fun CameraPreview(
             .also { ia ->
                 ia.setAnalyzer(analysisExecutor) { proxy ->
                     try {
-                        if (detector == null) return@setAnalyzer
+                        if (detectorTried.compareAndSet(false, true)) {
+                            detectorRef.set(
+                                runCatching { BbDocQuad.forPreview(context) }
+                                    .onFailure {
+                                        Log.e(CameraCaptureActivity.TAG, "no preview detector", it)
+                                    }
+                                    .getOrNull(),
+                            )
+                        }
+                        val detector = detectorRef.get() ?: return@setAnalyzer
                         val upright = proxy.toBitmap().rotated(proxy.imageInfo.rotationDegrees)
                         val result = detector.detect(upright, context)
                         liveQuad = result.takeIf { it.success }
@@ -322,7 +332,7 @@ private fun CameraPreview(
                             busy = true
                             takePicture(context, imageCapture, mainExecutor) { file ->
                                 busy = false
-                                if (file != null) onCaptured(file, scope)
+                                if (file != null) onCaptured(file)
                             }
                         },
                         enabled = !busy,
