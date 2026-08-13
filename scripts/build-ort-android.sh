@@ -197,19 +197,24 @@ fi
 # It also makes the re2 workaround below moot -- with a shared library to link,
 # CMake finally has a reason to build re2 -- but that step is left in place
 # because it is a no-op once re2 exists and still load-bearing without --with-java.
-# XNNPACK is built unconditionally, for both consumers of this tree:
+# XNNPACK rides with --with-java, and only there. The vendored DocQuad runner
+# asks for it explicitly, and that path uses this shared build.
 #
-#   - the vendored DocQuad runner asks for it explicitly (and for NNAPI, which
-#     we deliberately do not build -- MakeACopy's own comment records a native
-#     SIGABRT during NNAPI graph partitioning; the request is caught and falls
-#     back to CPU);
-#   - ocr-paddle registers no execution provider on Android today, so PP-OCRv5
-#     runs on the plain CPU EP while iOS gets CoreML. Compiling XNNPACK in is
-#     the prerequisite for closing that gap in core; it does not close it by
-#     itself, because core must also register the EP.
+# It must NOT go on the static (Rust-only) build: with
+# onnxruntime_BUILD_SHARED_LIB=OFF, onnxruntime_USE_XNNPACK=ON fails at CMake
+# generate with a wall of `install(EXPORT "onnxruntimeTargets") includes target
+# "onnxruntime" which requires target "absl_*" that is not in any export set`.
+# Adding it unconditionally broke the previously-green fdroid-ort-from-source
+# job, which builds exactly that configuration.
+#
+# Nothing is lost: ocr-paddle CAN now register XNNPACK (core v0.9.1), but
+# enabling that feature fails at link with undefined hidden xnn_* microkernel
+# symbols -- ort-sys does not add XNNPACK's kernel archives -- so the Rust side
+# has no use for it yet either way. NNAPI is deliberately never built; the
+# DocQuad runner catches its absence and falls back to CPU.
 JAVA_BUILD_FLAGS=""
 if [ "$WITH_JAVA" = 1 ]; then
-  JAVA_BUILD_FLAGS="--build_shared_lib --build_java"
+  JAVA_BUILD_FLAGS="--build_shared_lib --build_java --use_xnnpack"
   command -v javac >/dev/null 2>&1 || {
     echo "error: --with-java needs a JDK on PATH (JAVA_HOME/bin)." >&2; exit 1; }
 fi
@@ -227,7 +232,6 @@ python3 "$ORT_SRC/tools/ci_build/build.py" \
   --android_abi "$ANDROID_ABI" \
   --android_api "$ANDROID_API" \
   --android_cpp_shared \
-  --use_xnnpack \
   $JAVA_BUILD_FLAGS \
   --skip_tests \
   --skip_submodule_sync \
