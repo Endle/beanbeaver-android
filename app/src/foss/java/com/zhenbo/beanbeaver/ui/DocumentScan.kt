@@ -1,7 +1,8 @@
 package com.zhenbo.beanbeaver.ui
 
+import android.app.Activity
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -9,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The `foss` twin of the `full` flavour's Play-services document scanner —
@@ -16,43 +18,44 @@ import kotlinx.coroutines.withContext
  * empty state call it without knowing which flavour they are in.
  *
  * F-Droid does not accept Google Play services, and the ML Kit document scanner
- * is the app's only user of it. What that costs is the *guided capture* UI:
- * edge detection, perspective correction and the retake loop all live inside the
- * Play-services activity and have no FOSS equivalent here. What it does not cost
- * is scanning — this opens the system photo picker, so the user takes the photo
- * with their own camera app and picks it, and the bytes reach
- * `ReceiptPipeline.scan` by exactly the same path.
+ * is the app's only user of it. This flavour therefore captures in-process, with
+ * [CameraCaptureActivity] (CameraX): preview, shutter, review, retake.
  *
- * Deskew is therefore doing more work in this flavour than in `full`: the core's
- * own deskew (receipt-core, shipped since v0.7.2) is the only thing correcting a
- * skewed photo. That is the same situation as picking an existing photo in the
- * `full` flavour, which is already the common case, so this is a degradation of
- * capture ergonomics rather than of the parse.
+ * What it still does not do is *guided* capture — live document edge detection
+ * and perspective correction, which live inside the Play-services activity in
+ * `full`. Note that nothing else in the stack compensates for that: receipt-core
+ * excludes image deskew by design (`receipt-image/src/lib.rs`), and the deskew
+ * that does ship is detection-level, shearing OCR boxes to straighten sloped
+ * text rows — not a perspective correction on pixels. So a keystoned photo stays
+ * keystoned. Closing that gap is a separate change.
  *
- * Uses PickVisualMedia (single) rather than PickMultipleVisualMedia: this entry
- * point scans one receipt into the detail view. Batch import has its own
- * multi-select picker in [BatchImportScreen], and it is GMS-free in both flavours.
+ * Batch import keeps its own multi-select photo picker in [BatchImportScreen],
+ * which is GMS-free in both flavours; this entry point is the one-receipt path.
  */
 @Composable
 fun rememberDocumentScanLauncher(onImage: (ByteArray) -> Unit): () -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    val capture = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val path = result.data?.getStringExtra(CameraCaptureActivity.EXTRA_IMAGE_PATH)
+            ?: return@rememberLauncherForActivityResult
         scope.launch {
-            // Read off the main thread — a receipt photo is a few MB, and this
-            // mirrors what the full flavour does with the scanner's output.
+            // Read and clean up off the main thread — a full-quality receipt shot
+            // is several MB, and the capture file is ours to delete once the bytes
+            // are in hand.
             val bytes = withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                val file = File(path)
+                val data = runCatching { file.readBytes() }.getOrNull()
+                file.delete()
+                data
             }
             if (bytes != null) onImage(bytes)
         }
     }
 
-    return {
-        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-    }
+    return { capture.launch(Intent(context, CameraCaptureActivity::class.java)) }
 }

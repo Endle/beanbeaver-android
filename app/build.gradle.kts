@@ -338,6 +338,15 @@ dependencies {
     // the system photo picker, so nothing else in the app knows the difference.
     "fullImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
 
+    // In-app capture, `foss` only — this flavour's replacement for the ML Kit
+    // scanner above. Scoped to the flavour for the same reason that line is:
+    // the Play build must not grow a second camera stack it never uses.
+    val cameraX = "1.4.1"
+    "fossImplementation"("androidx.camera:camera-core:$cameraX")
+    "fossImplementation"("androidx.camera:camera-camera2:$cameraX")
+    "fossImplementation"("androidx.camera:camera-lifecycle:$cameraX")
+    "fossImplementation"("androidx.camera:camera-view:$cameraX")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Plain JVM unit tests (./gradlew :app:testDebugUnitTest) — no emulator, no
