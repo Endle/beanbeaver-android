@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- foss only. The `full` flavour's ML Kit scanner runs its capture UI inside
+         a Play-services activity, so that flavour never asks for CAMERA. Here the
+         capture happens in our own process, so the permission is ours to request.
+         Declaring it in the flavour manifest rather than the main one keeps the
+         Play build's permission list unchanged. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <application>
+        <activity
+            android:name="com.zhenbo.beanbeaver.ui.CameraCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.BeanBeaver" />
+    </application>
+
+</manifest>
