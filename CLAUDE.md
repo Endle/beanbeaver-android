@@ -332,8 +332,8 @@ and no fastlane metadata.
 
 | Dep | Why | Pinned at |
 |---|---|---|
-| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.1 |
-| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.9.0 |
+| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.4 |
+| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.9.2 |
 
 The `shared/` submodule pointer is a **third** thing to move and is not covered by
 either pin: `shared/src/bin/` is compiled into this package, so a mobile-util tag
@@ -351,8 +351,8 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.9.0**, reached *through* mobile-util
-  v0.1.1 — see the table above before bumping either. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.9.2**, reached *through* mobile-util
+  v0.1.4 — see the table above before bumping either. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -365,7 +365,12 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
   v0.8.4 was not — see below). **Non-empty is not the same as breaking**: read the
   diff. v0.8.4 → v0.9.0 touches five lines and none of them are exported — imports
   moved from `ocr_paddle::` to the `scan` composition root (core #61), so no Kotlin
-  call site and no `batch_e2e.rs` symbol moved.
+  call site and no `batch_e2e.rs` symbol moved. v0.9.1 → v0.9.2 is non-empty too
+  and also not breaking: it *adds* `ReceiptWarningKind::ImplausibleSummary` (core
+  #64). An added variant is the one FFI change this app absorbs for free, because
+  kinds are open by contract — `WarningSeverity.kt`'s `else ->` ranks it and
+  `WarningSeverityTest` fails if it goes unranked. Adding is safe; renaming or
+  removing a variant would not be.
 - **A warning is a record, not a string** (core v0.8.0). `ReceiptResult.warnings`
   is `[ReceiptWarning]` (`kind` + `message` + `afterItemIndex`) and
   `warning_after_item_indices` is gone. `WarningSeverity.kt` is the single place
