@@ -149,42 +149,82 @@ android {
         }
     }
 
-    // `full` is what ships to Play; `foss` is the same app with every Google Play
+    // `play` and `safehaven` are what ship to those two stores; `fdroid` is the
+    // same app with every Google Play
     // services dependency removed, which is a hard requirement for F-Droid — its
     // inclusion policy names GMS as not accepted, and asks for a flavour without
     // it when the app can work in some capacity without it. Here it can: the only
     // GMS user is the ML Kit document scanner, and the photo-picker capture path
     // is already the primary way receipts get in.
     //
-    // Same applicationId on purpose. It is one app on two stores, not two apps,
-    // and F-Droid only requires the id be unique to the project.
+    // Same applicationId on purpose. It is one app on several stores, not several
+    // apps, and F-Droid only requires the id be unique to the project.
+    // One flavour per distribution channel that needs its own artifact.
+    //
+    // Named after the channel, not the capture engine, because the divergence
+    // pressure comes from store *policy* rather than from the scanner: Play
+    // Billing only works for a Play install (see Entitlements.kt's stub), and
+    // Play forbids the in-app updater that a sideloaded channel wants. Neither
+    // is expressible in an engine-shaped name, and both split `play` from
+    // `safehaven`.
+    //
+    // THE RULE, because it is what keeps this from multiplying:
+    //
+    //   A flavour NAME may anticipate a divergence. A source SET must be
+    //   justified by one.
+    //
+    // So `play` and `safehaven` are two names over *one* directory (src/gms,
+    // wired below) and differ today only in a label. There is exactly one copy
+    // of the ML Kit DocumentScan.kt and it cannot drift. The day billing lands,
+    // `safehaven` grows src/safehaven/ — no rename, no restructuring.
+    //
+    // A channel that ingests a prebuilt APK needs no flavour at all: give
+    // IzzyOnAndroid the safehaven APK and write it in the README. A channel with
+    // a different capture engine (Huawei's HMS Scan Kit) earns a real source set.
     flavorDimensions += "distribution"
     productFlavors {
-        create("full") {
+        create("play") {
             dimension = "distribution"
             // So a bare `./gradlew :app:assembleDebug`-shaped habit, and the IDE's
             // default run configuration, keep meaning the Play build.
             isDefault = true
             // Shown in Settings > About under the version. Declared here rather
             // than switched on BuildConfig.FLAVOR in the UI so the flavour block
-            // stays the only place that spells out what the two builds differ on
-            // — the same reason DocumentScan.kt is per-source-set. Names the
-            // capture engine, because that is the whole difference and it is
-            // what a scan report needs to disambiguate.
-            buildConfigField("String", "DISTRIBUTION", "\"ML Kit (Play services)\"")
+            // stays the only place that spells out what the builds differ on —
+            // the same reason DocumentScan.kt is per-source-set.
+            //
+            // Names the channel AND the capture engine. It used to name only the
+            // engine, on the grounds that it was "the whole difference"; with
+            // play and safehaven sharing an engine that is no longer true, and a
+            // scan report needs to disambiguate both.
+            buildConfigField("String", "DISTRIBUTION", "\"Google Play · ML Kit\"")
             // The ML Kit client library this build was compiled against. Declared
-            // in both flavours because SettingsScreen lives in `main` and is
-            // compiled for each — a field defined in only one flavour is a
-            // missing symbol in the other, not a fallback.
+            // in every flavour because SettingsScreen lives in `main` and is
+            // compiled for each — a field defined in only some flavours is a
+            // missing symbol in the others, not a fallback.
             buildConfigField("String", "MLKIT_VERSION", "\"$mlKitDocumentScannerVersion\"")
         }
-        create("foss") {
+        create("safehaven") {
             dimension = "distribution"
-            buildConfigField("String", "DISTRIBUTION", "\"FOSS (photo picker)\"")
+            buildConfigField("String", "DISTRIBUTION", "\"SafeHaven · ML Kit\"")
+            buildConfigField("String", "MLKIT_VERSION", "\"$mlKitDocumentScannerVersion\"")
+        }
+        create("fdroid") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION", "\"F-Droid · photo picker\"")
             // Empty, not "none": this build links no ML Kit at all, and the About
-            // row is hidden rather than answered. fdroid.yml asserts the absence.
+            // row is hidden rather than answered. CI asserts the absence.
             buildConfigField("String", "MLKIT_VERSION", "\"\"")
         }
+    }
+
+    // play and safehaven share one source set. This is the mechanism behind the
+    // rule above: two flavour names, one directory, so the ML Kit capture path
+    // exists once. Gradle would otherwise expect src/play/ and src/safehaven/,
+    // and the second would start life as a copy of the first.
+    sourceSets {
+        getByName("play") { java.srcDir("src/gms/java") }
+        getByName("safehaven") { java.srcDir("src/gms/java") }
     }
 
     signingConfigs {
@@ -265,8 +305,8 @@ androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         val bundle = variant.artifacts.get(SingleArtifact.BUNDLE)
         // One task per release variant, registered inside onVariants rather than
-        // a single shared task configured from it. With the full/foss flavours
-        // this selector matches twice, and two variants configuring one task
+        // a single shared task configured from it. With the full/fdroid flavours
+        // this selector matches once per flavour, and several variants configuring one task
         // would have it read whichever bundle was wired last while claiming to
         // have checked both.
         val verify = tasks.register("verify${variant.name.replaceFirstChar(Char::uppercase)}Bundle") {
@@ -326,7 +366,7 @@ androidComponents {
             }
         }
         // AGP registers variant tasks after this script body runs, so
-        // bundleFullRelease doesn't exist yet; configureEach applies to it once
+        // bundlePlayRelease doesn't exist yet; configureEach applies to it once
         // it appears.
         tasks.matching { it.name == "bundle${variant.name.replaceFirstChar(Char::uppercase)}" }
             .configureEach { finalizedBy(verify) }
@@ -358,10 +398,17 @@ dependencies {
     // Android analog of iOS VisionKit. Delivered via Play services; the capture
     // UI runs in a Play-services activity, so no CAMERA permission is needed here.
     //
-    // `full` only — this single line is the entire reason the foss flavour exists.
-    // The foss source set supplies its own rememberDocumentScanLauncher backed by
-    // the system photo picker, so nothing else in the app knows the difference.
-    "fullImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:$mlKitDocumentScannerVersion")
+    // The GMS channels only — these two lines are the entire reason the fdroid
+    // flavour exists. The fdroid source set supplies its own
+    // rememberDocumentScanLauncher backed by the system photo picker, so nothing
+    // else in the app knows the difference.
+    //
+    // Declared twice rather than once for a shared parent configuration: play and
+    // safehaven share a source set (see sourceSets above) but not a dependency
+    // scope, and the day one of them takes Play Billing they stop being
+    // interchangeable here first.
+    "playImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:$mlKitDocumentScannerVersion")
+    "safehavenImplementation"("com.google.android.gms:play-services-mlkit-document-scanner:$mlKitDocumentScannerVersion")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

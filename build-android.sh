@@ -17,9 +17,9 @@
 # invoked automatically, for every flavour and every distribution channel.
 #
 # It is not an F-Droid-only concern, which is how it started. Letting the Play
-# build link pyke's prebuilt while only the foss build compiled ORT meant the two
+# build link pyke's prebuilt while only the fdroid build compiled ORT meant the two
 # store artifacts carried *different* OCR engines, so a scan bug could reproduce
-# on one channel and not the other; and because only foss-touching PRs built from
+# on one channel and not the other; and because only fdroid-touching PRs built from
 # source, a broken `ort` bump stayed invisible until an F-Droid submission, with
 # no recent known-good state to bisect against. One engine everywhere fixes both:
 # a bad bump now fails on the PR that causes it.
@@ -367,6 +367,6 @@ cat <<EOF
    kotlin glue: $PKG/src/main/kotlin/uniffi/
 
 Next:
-  ./gradlew :app:assembleFullDebug    # Play build (GMS document scanner)
-  ./gradlew :app:assembleFossDebug    # F-Droid build (no Play services)
+  ./gradlew :app:assemblePlayDebug    # Play build (GMS document scanner)
+  ./gradlew :app:assembleFdroidDebug    # F-Droid build (no Play services)
 EOF

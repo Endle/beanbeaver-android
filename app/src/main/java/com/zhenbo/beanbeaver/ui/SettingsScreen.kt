@@ -385,7 +385,7 @@ fun SettingsScreen(
             SettingsSection(
                 title = "About",
                 footer = "beanbeaver-core is the on-device scanning engine. Build is how this copy " +
-                    "captures a receipt: the ML Kit builds guide the shot, the FOSS builds take a " +
+                    "captures a receipt: the ML Kit builds guide the shot, the F-Droid build takes a " +
                     "photo you already have. ML Kit is the version this build was compiled " +
                     "against; Play services supplies the scanner itself and updates it " +
                     "separately. Include everything here when reporting a scan issue.",
@@ -393,7 +393,7 @@ fun SettingsScreen(
                 LabeledRow("BeanBeaver", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 LabeledRow("Build", BuildConfig.DISTRIBUTION)
                 LabeledRow("beanbeaver-core", BuildConfig.CORE_VERSION)
-                // Absent on foss, which links no ML Kit — an empty row would
+                // Absent on fdroid, which links no ML Kit — an empty row would
                 // invite the reader to wonder what the blank means.
                 if (BuildConfig.MLKIT_VERSION.isNotEmpty()) {
                     LabeledRow("ML Kit scanner", BuildConfig.MLKIT_VERSION)

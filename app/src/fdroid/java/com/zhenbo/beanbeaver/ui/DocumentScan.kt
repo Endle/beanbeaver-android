@@ -11,7 +11,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The `foss` twin of the `full` flavour's Play-services document scanner —
+ * The `fdroid` twin of the shared `src/gms` capture path (the `play` and
+ * `safehaven` flavours' Play-services document scanner) —
  * deliberately the same signature, so [BeanBeaverApp] and the Spending screen's
  * empty state call it without knowing which flavour they are in.
  *
@@ -23,10 +24,10 @@ import kotlinx.coroutines.withContext
  * with their own camera app and picks it, and the bytes reach
  * `ReceiptPipeline.scan` by exactly the same path.
  *
- * Deskew is therefore doing more work in this flavour than in `full`: the core's
+ * Deskew is therefore doing more work in this flavour than in the GMS ones: the core's
  * own deskew (receipt-core, shipped since v0.7.2) is the only thing correcting a
  * skewed photo. That is the same situation as picking an existing photo in the
- * `full` flavour, which is already the common case, so this is a degradation of
+ * GMS flavours, which is already the common case, so this is a degradation of
  * capture ergonomics rather than of the parse.
  *
  * Uses PickVisualMedia (single) rather than PickMultipleVisualMedia: this entry

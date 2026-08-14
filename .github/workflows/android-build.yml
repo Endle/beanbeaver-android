@@ -215,29 +215,29 @@ jobs:
           echo "OK: ORT statically linked from source, no aarch64 prebuilt fetched"
 
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleFullDebug
+        run: ./gradlew :app:assemblePlayDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-full-debug-apk
-          path: app/build/outputs/apk/full/debug/app-full-debug.apk
+          name: app-play-debug-apk
+          path: app/build/outputs/apk/play/debug/app-play-debug.apk
           if-no-files-found: error
 
       # Context-free JVM logic: the .xlsx writer, amount/price normalization,
       # display formatting. No emulator, no native library.
       - name: JVM unit tests
-        run: ./gradlew :app:testFullDebugUnitTest
+        run: ./gradlew :app:testPlayDebugUnitTest
 
       - name: Android Lint
-        run: ./gradlew :app:lintFullDebug
+        run: ./gradlew :app:lintPlayDebug
 
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lint-results-full-debug
-          path: app/build/reports/lint-results-fullDebug.*
+          name: lint-results-play-debug
+          path: app/build/reports/lint-results-playDebug.*
           if-no-files-found: ignore
 
       # The runtime gate. batch_e2e is the host twin of the on-device
@@ -358,39 +358,46 @@ jobs:
       # what the gates read (dex, native libs, BUNDLE-METADATA). verifyReleaseBundle
       # runs automatically as a finalizer.
       - name: Bundle release
-        run: ./gradlew :app:bundleFullRelease
+        run: ./gradlew :app:bundlePlayRelease
 
-      # R8 over the *foss* source set, which nothing else covers: fdroid.yml
-      # builds foss debug (unminified), and this job's bundle is `full`. A
-      # flavour-specific source file that R8 mishandles would otherwise only
-      # surface in an F-Droid build we don't run. It lives here rather than in
-      # fdroid.yml because this job already has a release-profile .so, and
-      # because it is about R8, not about ONNX Runtime. APK, not bundle —
-      # F-Droid publishes APKs, and it keeps verifyFossReleaseBundle out of the
-      # way. Note fdroid.yml's path filter must keep firing for foss sources, or
-      # this becomes the only coverage the flavour has on an unrelated PR.
-      - name: Assemble foss release (R8 over the F-Droid source set)
-        run: ./gradlew :app:assembleFossRelease
+      # Every flavour that is not the bundled one gets assembled here, so none can
+      # silently stop building. The bundle above is `play`; these are the other
+      # two.
+      #
+      # R8 over the *fdroid* source set is covered nowhere else — fdroid.yml is
+      # parked and built it unminified anyway — and a flavour-specific source file
+      # that R8 mishandles would otherwise only surface in a build we never run.
+      # It lives here rather than in fdroid.yml because this job already has a
+      # release-profile .so, and because it is about R8, not ONNX Runtime. APK,
+      # not bundle: F-Droid publishes APKs, and it keeps verifyFdroidReleaseBundle
+      # out of the way.
+      #
+      # `safehaven` shares src/gms with `play`, so today this only proves the
+      # flavour is still wired up — which is exactly what would rot silently while
+      # the two are identical. It stops being a formality the moment safehaven
+      # gains a source set of its own (Play Billing, an in-app updater).
+      - name: Assemble the non-bundled flavours (R8 over each source set)
+        run: ./gradlew :app:assembleSafehavenRelease :app:assembleFdroidRelease
 
-      # Also moved out of fdroid.yml. It asserted this against a foss *debug*
+      # Also moved out of fdroid.yml. It asserted this against a fdroid *debug*
       # APK; here it runs against the R8-minified one, which is strictly better —
       # R8 is what decides which classes survive, so a keep rule dragging GMS
       # back in is only visible after minification.
       #
-      # Dormant while SafeHaven and Play both take the `full` build, and kept
-      # anyway: the whole value of the foss flavour is that it still compiles and
+      # Dormant while safehaven links the same ML Kit scanner as play, and kept
+      # anyway: the whole value of the fdroid flavour is that it still compiles and
       # is still GMS-free the day F-Droid is picked back up. That is cheap to
       # assert now and expensive to reconstruct later.
-      - name: Assert no Google Play services in the foss APK
+      - name: Assert no Google Play services in the fdroid APK
         run: |
           set -euo pipefail
-          APK=app/build/outputs/apk/foss/release/app-foss-release.apk
+          APK=app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
           # grep -a: dex is binary. Package paths appear as plain strings in the
           # dex string pool, so this sees classes R8 kept for any reason.
           HITS=$(unzip -p "$APK" 'classes*.dex' \
             | LC_ALL=C grep -a -o 'com/google/android/gms/[a-z]*' | sort -u || true)
           if [ -n "$HITS" ]; then
-            echo "::error::foss APK references Google Play services:"
+            echo "::error::fdroid APK references Google Play services:"
             echo "$HITS"
             exit 1
           fi
@@ -398,13 +405,13 @@ jobs:
 
       - name: Report what shipped
         run: |
-          AAB=app/build/outputs/bundle/fullRelease/app-full-release.aab
+          AAB=app/build/outputs/bundle/playRelease/app-play-release.aab
           ls -l "$AAB"
           unzip -l "$AAB" | grep -E "\.so$|\.dex$|BUNDLE-METADATA" || true
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v4
         with:
-          name: app-full-release-aab
-          path: app/build/outputs/bundle/fullRelease/app-full-release.aab
+          name: app-play-release-aab
+          path: app/build/outputs/bundle/playRelease/app-play-release.aab
           if-no-files-found: error
