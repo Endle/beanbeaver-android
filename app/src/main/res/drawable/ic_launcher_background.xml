@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The sky-blue wash behind the receipt, matching beanbeaver-ios's AppIcon.
+
+  A gradient rather than the flat colour this used to be (#1B5E20, a dark green
+  from the MVP icon that shared nothing with iOS). The endpoints and the axis
+  are fitted from AppIcon1024.png rather than guessed: sampling its four
+  corners gives a wash that is much darker at the bottom than the top and
+  slightly darker on the left than the right, so the axis is close to vertical
+  but tilted. Fitting r/g/b as a plane over those corners puts the light end
+  off the top edge and the dark end off the bottom — which is why the
+  coordinates below fall outside the 0..108 viewport, and why they should not
+  be "corrected" to the corners.
+
+  Full-bleed by design: a launcher masks this layer to its own shape, so it
+  has to paint the whole 108x108 with no safe zone of its own.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="36.1"
+                android:startY="118"
+                android:endX="71.9"
+                android:endY="-10"
+                android:startColor="#6FBBF3"
+                android:endColor="#CFEEFB" />
+        </aapt:attr>
+    </path>
+</vector>
