@@ -13,12 +13,25 @@
 # Prerequisites: rustup + cargo, Android NDK (ANDROID_NDK_HOME), ANDROID_API
 # default 34 (app minSdk / Android 14).
 #
-# ORT_ANDROID_LIB_LOCATION=<dir> links ONNX Runtime from a source build instead
-# of letting `ort` download a prebuilt one (see scripts/build-ort-android.sh;
-# required for F-Droid, which never accepts prebuilt shared libraries):
+# ONNX Runtime is built FROM SOURCE by default — scripts/build-ort-android.sh is
+# invoked automatically, for every flavour and every distribution channel.
 #
-#   ORT_ANDROID_LIB_LOCATION="$(./scripts/build-ort-android.sh --print-lib-location)" \
-#     ./build-android.sh
+# It is not an F-Droid-only concern, which is how it started. Letting the Play
+# build link pyke's prebuilt while only the fdroid build compiled ORT meant the two
+# store artifacts carried *different* OCR engines, so a scan bug could reproduce
+# on one channel and not the other; and because only fdroid-touching PRs built from
+# source, a broken `ort` bump stayed invisible until an F-Droid submission, with
+# no recent known-good state to bisect against. One engine everywhere fixes both:
+# a bad bump now fails on the PR that causes it.
+#
+# The first build is slow (~4-6 min to clone and compile); after that the tree in
+# target/ort makes it a no-op. Two escape hatches, in order of preference:
+#
+#   ORT_ANDROID_LIB_LOCATION=<dir>   # link this tree; what CI's cache restores
+#   BB_ORT=prebuilt                  # fall back to pyke's CDN download
+#
+# BB_ORT=prebuilt exists for emergencies — an upstream break that would otherwise
+# block a release. It is a divergence, so it should not survive past the fix.
 #
 # It deliberately is NOT spelled ORT_LIB_LOCATION, the variable ort-sys actually
 # reads. That one would apply to every cargo invocation below, including the
@@ -215,17 +228,34 @@ find_ort_so() {
 for abi in $ABIS; do
   target="$(abi_to_target "$abi")"
   echo ">> building $CRATE for $target ($PROFILE) [abi=$abi]"
+  # ONNX Runtime is built from source by DEFAULT, for every flavour and every
+  # channel — see the header note. An explicit ORT_ANDROID_LIB_LOCATION still
+  # wins (that is how CI points at a restored cache), and BB_ORT=prebuilt opts
+  # out entirely.
+  ort_lib="${ORT_ANDROID_LIB_LOCATION:-}"
+  if [ -z "$ort_lib" ] && [ "${BB_ORT:-source}" != "prebuilt" ]; then
+    # --print-lib-location builds the tree if it is cold and just reprints the
+    # path if it is warm, so this is a no-op on a repeat build. ANDROID_ABI is
+    # forwarded because the ORT tree is per-ABI, and the NDK because both
+    # scripts must agree on it — build-ort-android.sh refuses a mismatch rather
+    # than quietly compiling ORT against a different one than cargo uses.
+    echo ">> ONNX Runtime from source (BB_ORT=prebuilt to opt out)"
+    ort_lib="$(ANDROID_NDK_HOME="$NDK" ANDROID_ABI="$abi" \
+      "$ANDROID_ROOT/scripts/build-ort-android.sh" --print-lib-location)"
+  fi
   # `env VAR=… cargo` rather than an exported VAR: see the header note on why
   # ORT_LIB_LOCATION must not survive into the host bindgen build below.
   ort_env=()
-  if [ -n "${ORT_ANDROID_LIB_LOCATION:-}" ]; then
-    if [ ! -f "$ORT_ANDROID_LIB_LOCATION/libonnxruntime_common.a" ]; then
-      echo "error: no libonnxruntime_common.a in $ORT_ANDROID_LIB_LOCATION" >&2
+  if [ -n "$ort_lib" ]; then
+    if [ ! -f "$ort_lib/libonnxruntime_common.a" ]; then
+      echo "error: no libonnxruntime_common.a in $ort_lib" >&2
       echo "  This must be the CMake binary dir (…/build-$abi/Release), not its parent." >&2
       exit 1
     fi
-    echo "   ONNX Runtime from source: $ORT_ANDROID_LIB_LOCATION"
-    ort_env=(env "ORT_LIB_LOCATION=$ORT_ANDROID_LIB_LOCATION")
+    echo "   ONNX Runtime from source: $ort_lib"
+    ort_env=(env "ORT_LIB_LOCATION=$ort_lib")
+  else
+    echo "   ONNX Runtime: prebuilt from pyke's CDN (BB_ORT=prebuilt)"
   fi
   # ${a[@]+"${a[@]}"} — expanding an empty array as "${a[@]}" is an unbound
   # variable under `set -u` in bash 3.2, which is what /usr/bin/env bash still
@@ -337,6 +367,6 @@ cat <<EOF
    kotlin glue: $PKG/src/main/kotlin/uniffi/
 
 Next:
-  ./gradlew :app:assembleFullDebug    # Play build (GMS document scanner)
-  ./gradlew :app:assembleFossDebug    # F-Droid build (no Play services)
+  ./gradlew :app:assemblePlayDebug    # Play build (GMS document scanner)
+  ./gradlew :app:assembleFdroidDebug    # F-Droid build (no Play services)
 EOF

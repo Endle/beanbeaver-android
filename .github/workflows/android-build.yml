@@ -36,6 +36,18 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # ONNX Runtime is compiled from source for every build here, because that is
+  # what ships to every channel (see build-android.sh's header).
+  #
+  # Out of `target/` deliberately, which is where build-ort-android.sh puts it by
+  # default: `target` is in the cargo cache entry below, and the ORT tree is
+  # 2.2 GB — 892 MB of git checkout plus 495 MB of build output. Caching that
+  # wholesale would blow most of the repo's 10 GB Actions budget and start
+  # evicting the entries that actually matter. Kept separate, only the 112 MB of
+  # .a files need storing.
+  ORT_BUILD_DIR: ${{ github.workspace }}/.ort
+
 jobs:
   build:
     name: Build APK + unit tests + host E2E
@@ -88,6 +100,42 @@ jobs:
           key: cargo-ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-ort-${{ runner.os }}-
 
+      # ORT wants cmake >= 3.28 (the image is well past it) and ninja, which it
+      # does not ship.
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # Keyed on what actually determines the output: the recipe, and the
+      # ort-sys version — build-ort-android.sh derives the ONNX Runtime tag from
+      # ort-sys's own dist.txt rather than hardcoding it. Keying on all of
+      # Cargo.lock instead would pay a ~12 min rebuild on every unrelated
+      # dependency bump, which is most of them.
+      - name: Derive the ort-sys version
+        run: |
+          set -euo pipefail
+          V="$(awk '/^name = "ort-sys"$/{f=1; next} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.lock)"
+          test -n "$V" || { echo "::error::could not read ort-sys version from Cargo.lock"; exit 1; }
+          echo "ORT_SYS_VERSION=$V" >> "$GITHUB_ENV"
+
+      # Only the static libs, not the 2.2 GB tree. build-ort-android.sh
+      # short-circuits when libonnxruntime_common.a and _deps/re2-build/libre2.a
+      # are both present — both are .a files — so restoring just these skips the
+      # compile. Verified, not assumed: a tree containing nothing but these 81
+      # files links and yields a statically linked .so.
+      #
+      # A SEPARATE entry from the cargo cache above, and unlike that pairing this
+      # one is safe. The rule there exists because a restored target/ marks
+      # ort-sys's build script as run, suppressing the download that would refill
+      # an evicted pyke dir — nothing else can produce it, so it wedges. Here the
+      # producer is unconditional: build-android.sh always invokes
+      # build-ort-android.sh, which rebuilds whatever is missing. A miss costs
+      # ~12 minutes; it cannot wedge.
+      - name: Cache ONNX Runtime (built from source)
+        uses: actions/cache@v4
+        with:
+          path: .ort/build-*/Release/**/*.a
+          key: ort-src-${{ runner.os }}-${{ env.ORT_SYS_VERSION }}-${{ hashFiles('scripts/build-ort-android.sh') }}
+
       # ~19 MB of ONNX weights pulled from a fixed release tag, so the key only
       # has to change when the script points at a different release.
       - name: Cache OCR models
@@ -133,30 +181,63 @@ jobs:
       - name: Build core (.so + UniFFI Kotlin bindings)
         run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BB_NDK" PROFILE=debug ./build-android.sh
 
+      # Moved here from fdroid.yml, which no longer runs on every push. It was
+      # never really an F-Droid-specific property: ORT is now compiled from
+      # source for every channel, so "nothing prebuilt got linked" is a claim
+      # about the library that ships to Play and SafeHaven too, and a silent
+      # fallback to the CDN download is exactly the regression worth catching.
+      - name: Assert ONNX Runtime was linked from source, not downloaded
+        run: |
+          set -euo pipefail
+          SO=bbreceiptkit/src/main/jniLibs/arm64-v8a/libbb_mobile_ffi.so
+          READELF="$ANDROID_HOME/ndk/$BB_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+
+          echo "== DT_NEEDED =="
+          "$READELF" -d "$SO" | grep NEEDED
+          if "$READELF" -d "$SO" | grep -q 'libonnxruntime'; then
+            echo "::error::$SO wants a separate libonnxruntime.so; ORT was not linked statically"
+            exit 1
+          fi
+
+          # ort-sys caches every CDN download under a per-target directory, so
+          # this is a direct statement that the aarch64 library was not fetched.
+          #
+          # Only the Android target is asserted, and that is not an oversight:
+          # build-android.sh also runs a *host* cargo build to generate the Kotlin
+          # bindings, and that one does still download a host prebuilt. It is not
+          # shipped in the APK — but it is a real open question for F-Droid, whose
+          # build would run this same script. Tracked separately.
+          CACHED=~/.cache/ort.pyke.io/dfbin/aarch64-linux-android
+          if [ -d "$CACHED" ]; then
+            echo "::error::$CACHED exists — a prebuilt aarch64 ONNX Runtime was downloaded"
+            exit 1
+          fi
+          echo "OK: ORT statically linked from source, no aarch64 prebuilt fetched"
+
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleFullDebug
+        run: ./gradlew :app:assemblePlayDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-full-debug-apk
-          path: app/build/outputs/apk/full/debug/app-full-debug.apk
+          name: app-play-debug-apk
+          path: app/build/outputs/apk/play/debug/app-play-debug.apk
           if-no-files-found: error
 
       # Context-free JVM logic: the .xlsx writer, amount/price normalization,
       # display formatting. No emulator, no native library.
       - name: JVM unit tests
-        run: ./gradlew :app:testFullDebugUnitTest
+        run: ./gradlew :app:testPlayDebugUnitTest
 
       - name: Android Lint
-        run: ./gradlew :app:lintFullDebug
+        run: ./gradlew :app:lintPlayDebug
 
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lint-results-full-debug
-          path: app/build/reports/lint-results-fullDebug.*
+          name: lint-results-play-debug
+          path: app/build/reports/lint-results-playDebug.*
           if-no-files-found: ignore
 
       # The runtime gate. batch_e2e is the host twin of the on-device
@@ -217,6 +298,25 @@ jobs:
           key: cargo-ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-ort-${{ runner.os }}-
 
+      # Same three steps as the build job above, and the comments there explain
+      # the key and why this cache is a separate entry. This job builds the
+      # release artifacts, so it compiles ORT from source too.
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Derive the ort-sys version
+        run: |
+          set -euo pipefail
+          V="$(awk '/^name = "ort-sys"$/{f=1; next} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.lock)"
+          test -n "$V" || { echo "::error::could not read ort-sys version from Cargo.lock"; exit 1; }
+          echo "ORT_SYS_VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Cache ONNX Runtime (built from source)
+        uses: actions/cache@v4
+        with:
+          path: .ort/build-*/Release/**/*.a
+          key: ort-src-${{ runner.os }}-${{ env.ORT_SYS_VERSION }}-${{ hashFiles('scripts/build-ort-android.sh') }}
+
       - name: Cache OCR models
         uses: actions/cache@v4
         with:
@@ -258,29 +358,60 @@ jobs:
       # what the gates read (dex, native libs, BUNDLE-METADATA). verifyReleaseBundle
       # runs automatically as a finalizer.
       - name: Bundle release
-        run: ./gradlew :app:bundleFullRelease
+        run: ./gradlew :app:bundlePlayRelease
 
-      # R8 over the *foss* source set, which nothing else covers: fdroid.yml
-      # builds foss debug (unminified), and this job's bundle is `full`. A
-      # flavour-specific source file that R8 mishandles would otherwise only
-      # surface in an F-Droid build we don't run. It lives here rather than in
-      # fdroid.yml because this job already has a release-profile .so, and
-      # because it is about R8, not about ONNX Runtime. APK, not bundle —
-      # F-Droid publishes APKs, and it keeps verifyFossReleaseBundle out of the
-      # way. Note fdroid.yml's path filter must keep firing for foss sources, or
-      # this becomes the only coverage the flavour has on an unrelated PR.
-      - name: Assemble foss release (R8 over the F-Droid source set)
-        run: ./gradlew :app:assembleFossRelease
+      # Every flavour that is not the bundled one gets assembled here, so none can
+      # silently stop building. The bundle above is `play`; these are the other
+      # two.
+      #
+      # R8 over the *fdroid* source set is covered nowhere else — fdroid.yml is
+      # parked and built it unminified anyway — and a flavour-specific source file
+      # that R8 mishandles would otherwise only surface in a build we never run.
+      # It lives here rather than in fdroid.yml because this job already has a
+      # release-profile .so, and because it is about R8, not ONNX Runtime. APK,
+      # not bundle: F-Droid publishes APKs, and it keeps verifyFdroidReleaseBundle
+      # out of the way.
+      #
+      # `safehaven` shares src/gms with `play`, so today this only proves the
+      # flavour is still wired up — which is exactly what would rot silently while
+      # the two are identical. It stops being a formality the moment safehaven
+      # gains a source set of its own (Play Billing, an in-app updater).
+      - name: Assemble the non-bundled flavours (R8 over each source set)
+        run: ./gradlew :app:assembleSafehavenRelease :app:assembleFdroidRelease
+
+      # Also moved out of fdroid.yml. It asserted this against a fdroid *debug*
+      # APK; here it runs against the R8-minified one, which is strictly better —
+      # R8 is what decides which classes survive, so a keep rule dragging GMS
+      # back in is only visible after minification.
+      #
+      # Dormant while safehaven links the same ML Kit scanner as play, and kept
+      # anyway: the whole value of the fdroid flavour is that it still compiles and
+      # is still GMS-free the day F-Droid is picked back up. That is cheap to
+      # assert now and expensive to reconstruct later.
+      - name: Assert no Google Play services in the fdroid APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
+          # grep -a: dex is binary. Package paths appear as plain strings in the
+          # dex string pool, so this sees classes R8 kept for any reason.
+          HITS=$(unzip -p "$APK" 'classes*.dex' \
+            | LC_ALL=C grep -a -o 'com/google/android/gms/[a-z]*' | sort -u || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::fdroid APK references Google Play services:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "OK: no com.google.android.gms references in $APK"
 
       - name: Report what shipped
         run: |
-          AAB=app/build/outputs/bundle/fullRelease/app-full-release.aab
+          AAB=app/build/outputs/bundle/playRelease/app-play-release.aab
           ls -l "$AAB"
           unzip -l "$AAB" | grep -E "\.so$|\.dex$|BUNDLE-METADATA" || true
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v4
         with:
-          name: app-full-release-aab
-          path: app/build/outputs/bundle/fullRelease/app-full-release.aab
+          name: app-play-release-aab
+          path: app/build/outputs/bundle/playRelease/app-play-release.aab
           if-no-files-found: error

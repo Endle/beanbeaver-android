@@ -17,6 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * The capture path for every flavour that may link Google Play services. This
+ * directory is **not** a flavour of its own: `src/gms` is wired into both `play`
+ * and `safehaven` in build.gradle.kts, so the ML Kit scanner exists exactly once
+ * and the two channels cannot drift apart while they agree. `fdroid` supplies its
+ * own file at the same fully-qualified name.
+ *
  * Remembers a launcher for the Play-services document scanner — guided capture
  * with automatic edge-detection and deskew, the Android analog of iOS VisionKit.
  * Returns a `start()` to wire to a button; the cropped JPEG's bytes come back
