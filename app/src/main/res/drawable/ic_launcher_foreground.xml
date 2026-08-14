@@ -1,14 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The receipt mark from beanbeaver-ios's AppIcon, redrawn as a vector.
+
+  Same artwork as iOS (a till receipt feeding out of a printer slot, with a
+  torn bottom edge and a window showing two lines of print), traced from
+  AppIcon1024.png so the two stores show the same logo. It is a redraw rather
+  than a copy of the PNG on purpose: an adaptive icon needs the mark and its
+  background on *separate* layers, and the iOS asset is one flat square with
+  the blue baked in.
+
+  Two things follow from the adaptive-icon canvas and are easy to undo by
+  accident:
+
+  1. The mark is scaled to sit inside a circle of radius 35 around the centre
+     of the 108x108 viewport. Launchers mask this layer to their own shape —
+     circle, squircle, rounded square — and only the inner 72dp is guaranteed
+     to survive. At iOS's proportions the mark fills nearly the whole square,
+     so pasted in at full size the printer slot and the torn edge get cropped.
+     If you rescale, keep every extremity within that radius.
+  2. The window in the receipt is a *hole*, not blue paint: the body path uses
+     fillType="evenOdd" so the gradient in ic_launcher_background shows
+     through, exactly as the background does on iOS. Filling it with a colour
+     instead would freeze one sample of a gradient and show a seam.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Simple receipt silhouette for the MVP launcher icon. -->
+
+    <!-- Printer slot: a stadium, wider than the receipt it feeds. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34,22h40c2.2,0 4,1.8 4,4v56c0,2.2 -1.8,4 -4,4H34c-2.2,0 -4,-1.8 -4,-4V26c0,-2.2 1.8,-4 4,-4z" />
+        android:pathData="M36.33,24.85L71.67,24.85a5.45,5.45 0 0,1 0,10.9L36.33,35.75a5.45,5.45 0 0,1 0,-10.9z" />
+
+    <!-- Receipt body with its torn bottom edge, and the window punched out of
+         it. Seven half-circle bites, matching the iOS artwork's spacing. -->
     <path
-        android:fillColor="#1B5E20"
-        android:pathData="M40,34h28v4H40zM40,44h28v4H40zM40,54h20v4H40zM40,64h24v4H40z" />
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M35.83,83.15L38.01,83.15a1.67,1.67 0 0,1 3.34,0L42.73,83.15a1.67,1.67 0 0,1 3.34,0L47.53,83.15a1.67,1.67 0 0,1 3.34,0L52.18,83.15a1.67,1.67 0 0,1 3.34,0L56.98,83.15a1.67,1.67 0 0,1 3.34,0L61.71,83.15a1.67,1.67 0 0,1 3.34,0L66.43,83.15a1.67,1.67 0 0,1 3.34,0L71.74,83.15L71.74,31.54L35.83,31.54zM45.13,37.79L62.58,37.79a1.31,1.31 0 0,1 1.31,1.31L63.89,72.25a1.31,1.31 0 0,1 -1.31,1.31L45.13,73.56a1.31,1.31 0 0,1 -1.31,-1.31L43.82,39.1a1.31,1.31 0 0,1 1.31,-1.31z" />
+
+    <!-- The two lines of print inside the window. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M47.02,39.68L60.98,39.68a1.45,1.45 0 0,1 0,2.91L47.02,42.59a1.45,1.45 0 0,1 0,-2.91z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.73,44.33L55.02,44.33a1.16,1.16 0 0,1 0,2.33L46.73,46.66a1.16,1.16 0 0,1 0,-2.33z" />
 </vector>
