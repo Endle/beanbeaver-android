@@ -56,15 +56,15 @@ Apache License 2.0 except where noted; the full text appears below.
     Apache-2.0 option.
     https://github.com/java-native-access/jna
 
-### Google Play services — the Play build only
+### Google Play services — the ML Kit builds only
 
-BeanBeaver is published in two builds, and they do not carry the same
+BeanBeaver is published in more than one build, and they do not carry the same
 dependencies. Settings > About names which one you are running.
 
     Google Play services ML Kit document scanner — Apache-2.0
         (com.google.android.gms:play-services-mlkit-document-scanner 16.0.0)
 
-**Play build only.** It is the app's sole Google Play services dependency, and it
+**The Google Play and SafeHaven builds only.** It is the app's sole Google Play services dependency, and it
 is used for one thing: the guided document-capture screen. No other ML Kit or
 Play services component is bundled — text recognition, parsing and
 categorization are BeanBeaver's own, running on the PP-OCRv5 models above.

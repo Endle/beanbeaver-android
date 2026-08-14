@@ -19,7 +19,7 @@ android/                         ← this directory is self-contained
   models/                        PP-OCRv5 .onnx (or ../models fallback)
   scripts/
     android-e2e.sh               adb batch harness
-    build-ort-android.sh         ONNX Runtime from source (FOSS/F-Droid build)
+    build-ort-android.sh         ONNX Runtime from source (run by build-android.sh)
   shared/                        submodule: Endle/beanbeaver-mobile-util
     scripts/compare-e2e.py       ← shared with beanbeaver-ios
     scripts/fetch-models.sh
@@ -49,9 +49,9 @@ cd android
 ./build-android.sh                 # PROFILE=debug for faster iteration
 
 # APK
-./gradlew :app:assembleFullDebug
-# → app/build/outputs/apk/full/debug/app-full-debug.apk
-# (:app:assembleFossDebug for the Play-services-free F-Droid build)
+./gradlew :app:assemblePlayDebug
+# → app/build/outputs/apk/play/debug/app-play-debug.apk
+# (:app:assembleFdroidDebug for the Play-services-free F-Droid build)
 ```
 
 Or open **this** `android/` folder in Android Studio.

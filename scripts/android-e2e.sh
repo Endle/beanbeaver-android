@@ -67,11 +67,11 @@ if ! "$ADB" devices | awk 'NR>1 && $2=="device"{ok=1} END{exit !ok}'; then
   exit 1
 fi
 
-# full (Play, GMS document scanner) or foss (F-Droid, no Play services). The scan
+# full (Play, GMS document scanner) or fdroid (F-Droid, no Play services). The scan
 # pipeline this harness exercises is identical in both — the flavours differ only
 # in how a photo is captured, which the batch runner bypasses entirely — so this
-# defaults to `full` and exists so the F-Droid build can be spot-checked too.
-FLAVOR="${FLAVOR:-full}"
+# defaults to `play` and exists so the other channels can be spot-checked too.
+FLAVOR="${FLAVOR:-play}"
 Flavor="$(printf '%s' "${FLAVOR:0:1}" | tr '[:lower:]' '[:upper:]')${FLAVOR:1}"
 
 if [ "${BUILD:-0}" = "1" ]; then

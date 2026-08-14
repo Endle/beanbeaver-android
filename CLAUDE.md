@@ -28,14 +28,14 @@ side deliberately has no twin until that comes back.
 | Path | Role |
 |---|---|
 | `app/` | The Compose app (`com.zhenbo.beanbeaver`). Kotlin under `app/src/main/java/…` (a `java/` dir holding `.kt`). `MainActivity`, `ui/BeanBeaverApp.kt` (whole screen), `receipt/` (`ReceiptPipeline` VM, `ModelStore`, `BatchRunner`). |
-| `app/src/{full,foss}/` | The two product flavours — see "Flavours" below. Each holds exactly one file: its own `ui/DocumentScan.kt`. |
+| `app/src/{gms,fdroid}/` | Capture-path source sets — see "Flavours" below. `gms` is shared by the `play` and `safehaven` flavours; each dir holds exactly one file, its own `ui/DocumentScan.kt`. |
 | `bbreceiptkit/` | Local Gradle library wrapping the core. Hand-written `ReceiptScanner.kt`; the UniFFI-generated `uniffi/…` Kotlin and `jniLibs/` are **git-ignored**, produced by `build-android.sh`. |
 | `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Pins the **`bb-mobile-ffi`** tag (the library that ships) *and* the `bb-receipt-ffi` tag (for `batch_e2e.rs`) — **the two must agree on the core version**. Hosts two bins — `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness) — whose **sources live in `shared/`**, compiled here via `[[bin]] path`. `src/lib.rs` is an empty lib target. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./shared/scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
 | `scripts/` | `android-e2e.sh` (adb batch harness), `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — run automatically by `build-android.sh` for **every** build, see below). |
 | `shared/` | **Git submodule** — [`beanbeaver-mobile-util`](https://github.com/Endle/beanbeaver-mobile-util), the assets iOS and Android genuinely share: `scripts/compare-e2e.py`, `scripts/fetch-models.sh`, `src/bin/uniffi-bindgen.rs`, `src/bin/batch_e2e.rs`. See "The `shared/` submodule" below. |
-| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s **projection / re-attachment** (the arithmetic itself moved to Rust — see below). |
+| `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testPlayDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s **projection / re-attachment** (the arithmetic itself moved to Rust — see below). |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
 | `.github/workflows/` | `android-build.yml` (the CI below) and `fdroid.yml` (the F-Droid build — **parked 2026-08-13, `workflow_dispatch` only**). |
 
@@ -92,8 +92,8 @@ printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
 
 ./shared/scripts/fetch-models.sh   # if models/ lacks the 3 .onnx files
 ./build-android.sh                 # PROFILE=debug for faster iteration
-./gradlew :app:assembleFullDebug   # → app/build/outputs/apk/full/debug/app-full-debug.apk
-"$ANDROID_HOME/platform-tools/adb" install -r app/build/outputs/apk/full/debug/app-full-debug.apk
+./gradlew :app:assemblePlayDebug   # → app/build/outputs/apk/play/debug/app-play-debug.apk
+"$ANDROID_HOME/platform-tools/adb" install -r app/build/outputs/apk/play/debug/app-play-debug.apk
 ```
 
 One-time SDK setup (Android Studio SDK Manager / Device Manager): install the **NDK**,
@@ -107,7 +107,7 @@ Play needs a **signed `.aab`**, not an APK:
 ```bash
 cp keystore.properties.example keystore.properties   # then fill in real values
 ./build-android.sh                                    # PROFILE=release (default)
-./gradlew :app:bundleFullRelease                      # → app/build/outputs/bundle/fullRelease/app-full-release.aab
+./gradlew :app:bundlePlayRelease                      # → app/build/outputs/bundle/playRelease/app-play-release.aab
 ```
 
 - Signing reads `keystore.properties` (git-ignored; see `keystore.properties.example`).
@@ -116,14 +116,14 @@ cp keystore.properties.example keystore.properties   # then fill in real values
 - Every upload needs a unique, higher `versionCode` (`app/build.gradle.kts`).
 - **Two gates run automatically; neither has an escape hatch, by design.**
   `:bbreceiptkit:verifyReleaseNativeProfile` refuses to start a release build whose
-  `jniLibs/` came from `PROFILE=debug`, and `:app:verifyFullReleaseBundle` finalizes
-  `bundleFullRelease` and refuses to leave behind an `.aab` that would earn a Play warning
+  `jniLibs/` came from `PROFILE=debug`, and `:app:verifyPlayReleaseBundle` finalizes
+  `bundlePlayRelease` and refuses to leave behind an `.aab` that would earn a Play warning
   (size, missing native symbols, missing mapping). Each failure message names the
   console text it prevents. A healthy bundle is **~38 MB**.
 - 16 KB page-size support is **mandatory** for Android 15+ targets: `useLegacyPackaging =
   false`, `extractNativeLibs="false"`, JNA ≥5.17, and the `max-page-size=16384` link arg
   in `build-android.sh` — all already wired. Verify with
-  `zipalign -c -P 16 -v 4 app-full-release.aab` or Android Studio's APK Analyzer.
+  `zipalign -c -P 16 -v 4 app-play-release.aab` or Android Studio's APK Analyzer.
 - Console-side (not in this repo): privacy-policy URL (host `PRIVACY.md`), Data safety
   form, content rating, target-audience + financial-app declarations, and store-listing
   assets (512² icon, 1024×500 feature graphic, ≥2 screenshots).
@@ -134,8 +134,8 @@ Two `ubuntu-latest` jobs here, plus a third in its own file (below).
 
 **`build`** — the Android twin of iOS's `ios-build.yml`: NDK cross-build of
 `bb-receipt-ffi` + UniFFI codegen (`PROFILE=debug ./build-android.sh`) →
-`:app:assembleFullDebug` (APK uploaded as an artifact) → `:app:testFullDebugUnitTest` →
-`:app:lintFullDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
+`:app:assemblePlayDebug` (APK uploaded as an artifact) → `:app:testPlayDebugUnitTest` →
+`:app:lintPlayDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
 `shared/scripts/compare-e2e.py` grades merchant/date/total/items against
 `tests/receipts_e2e/`.
 Cargo, the source-built ORT static libs, the ONNX weights and Gradle are all
@@ -146,10 +146,10 @@ is worth surfacing.
 **`release-bundle`** — the path that actually ships, which nothing exercised
 until v0.4.0 reached Play carrying a debug native library. Release-profile
 `./build-android.sh` (deliberately: the gates refuse a debug library, and this
-job exists to test what gets uploaded) → `:app:bundleFullRelease`, which runs R8, the
+job exists to test what gets uploaded) → `:app:bundlePlayRelease`, which runs R8, the
 strip/symbol extraction, and both gates as a finalizer. Unsigned — signing has no
 bearing on what the gates read. **This is the only CI coverage R8 has**, since
-`:app:assembleFullDebug` never runs it.
+`:app:assemblePlayDebug` never runs it.
 
 ### `fdroid.yml` — parked, manual only (2026-08-13)
 
@@ -164,11 +164,11 @@ moved there rather than dropped:
 - ONNX Runtime compiled from source, plus the assertions that nothing prebuilt
   was linked (no `libonnxruntime` `DT_NEEDED`, no `aarch64-linux-android` entry in
   ort's download cache). This is no longer an F-Droid-only property — see below.
-- **Zero** `com.google.android.gms` strings in the foss dex, now checked against
+- **Zero** `com.google.android.gms` strings in the fdroid dex, now checked against
   the **R8-minified release** APK instead of a debug one, which is strictly
   stronger: R8 decides what survives, so a keep rule dragging GMS back in is only
   visible after minification.
-- That the foss flavour still compiles, via `assembleFossRelease`.
+- That the fdroid flavour still compiles, via `assembleFdroidRelease`.
 
 What is genuinely only in `fdroid.yml` is the **uncached, from-scratch ORT
 compile**. `android-build.yml` caches the static libs, so it proves ORT still
@@ -197,55 +197,75 @@ and, if it ever needs to be automatic, via a self-hosted arm64 Mac runner or a
 device farm (Firebase Test Lab — which would want an instrumented `androidTest`
 wrapper around `BatchRunner`; there is no `androidTest` source set today).
 
-### Flavours: `full` (Play) and `foss` (F-Droid)
+### Flavours: one per distribution channel
 
 One dimension, `distribution`, so every variant task carries the flavour:
-`assembleFullDebug`, `bundleFullRelease`, `testFullDebugUnitTest`,
-`lintFullDebug`, `verifyFullReleaseBundle`. **`full` is `isDefault`**, so it is
-what the IDE and any half-remembered command land on, and it is what ships to
-Play. Same `applicationId` in both — one app on two stores.
+`assemblePlayDebug`, `bundlePlayRelease`, `testPlayDebugUnitTest`,
+`lintPlayDebug`, `verifyPlayReleaseBundle`. **`play` is `isDefault`**, so it is
+what the IDE and any half-remembered command land on. Same `applicationId` in all
+three — one app on several stores, which is also all F-Droid requires.
 
-The entire difference is one dependency and one file:
+| Flavour | Store | Source set | ML Kit | `BuildConfig.DISTRIBUTION` |
+|---|---|---|---|---|
+| `play` | Google Play | `src/gms` (shared) | yes | `"Google Play · ML Kit"` |
+| `safehaven` | SafeHaven | `src/gms` (shared) | yes | `"SafeHaven · ML Kit"` |
+| `fdroid` | F-Droid | `src/fdroid` | **no** | `"F-Droid · photo picker"` |
 
-| | `full` | `foss` |
-|---|---|---|
-| `play-services-mlkit-document-scanner` | yes (`fullImplementation`) | **no** |
-| `ui/DocumentScan.kt` | GMS guided capture (edge-detect, deskew, retake) | system photo picker |
-| `BuildConfig.DISTRIBUTION` | `"ML Kit (Play services)"` | `"FOSS (photo picker)"` |
-| everything else | identical | identical |
+**Named after the channel, not the capture engine**, because the divergence
+pressure is store *policy*, not the scanner: Play Billing only works for a Play
+install (see `Entitlements.kt`'s stub) and Play forbids the in-app updater a
+sideloaded channel wants. Neither is expressible in an engine-shaped name, and
+both split `play` from `safehaven`.
 
-`DISTRIBUTION` is a `buildConfigField` set in each flavour block and shown in
-Settings > About, so a user reporting a scan problem can say which build they
-have. It is declared beside the flavour rather than switched on
-`BuildConfig.FLAVOR` at the call site, to keep the flavour block the only place
-that spells out the difference.
+**The rule that keeps this from multiplying:**
 
-`rememberDocumentScanLauncher` has the same signature in both source sets, so
-`ui/BeanBeaverApp.kt` calls it without knowing the flavour and neither file needs
-an `#ifdef`-shaped conditional. What `foss` loses is *guided capture*, not
+> A flavour **name** may anticipate a divergence. A source **set** must be
+> justified by one.
+
+So `play` and `safehaven` are two names over *one* directory — `src/gms`, wired
+to both in `build.gradle.kts` — and differ today only in a label. There is
+exactly one copy of the ML Kit `DocumentScan.kt` and it cannot drift. The day
+billing lands, `safehaven` grows `src/safehaven/`: no rename, no restructuring.
+
+Applying the rule to the channels that keep coming up:
+
+- **IzzyOnAndroid** ingests a prebuilt APK, so it gets **no flavour** — give it
+  the `safehaven` APK and say so in the README.
+- **Huawei AppGallery** has no GMS but its own HMS Scan Kit — a genuinely
+  different capture engine, so it earns a real `src/huawei/` source set.
+
+`rememberDocumentScanLauncher` has the same signature in every source set, so
+`ui/BeanBeaverApp.kt` calls it without knowing the flavour and no file needs an
+`#ifdef`-shaped conditional. What `fdroid` loses is *guided capture*, not
 scanning: the user shoots with their own camera app and picks the photo, and the
-bytes reach `ReceiptPipeline.scan` by the same path — which is already the common
-case in `full`, since batch import has always used the picker. Deskew is left to
+bytes reach `ReceiptPipeline.scan` by the same path — already the common case
+under GMS, since batch import has always used the picker. Deskew is left to
 receipt-core's own (shipped v0.7.2).
 
-Both flavours are built in CI, and `fdroid-ort-from-source` fails if any
-`com.google.android.gms` string survives into the foss dex. **Build both before
-opening a PR** — a flavour that only exists in one source set is exactly the kind
-of thing that compiles for you and not for the other variant.
+CI builds all three (`bundlePlayRelease` plus `assembleSafehavenRelease` and
+`assembleFdroidRelease`) and fails if any `com.google.android.gms` string
+survives into the fdroid dex. **Build all three before opening a PR** — a symbol
+that only exists in one source set is exactly the kind of thing that compiles for
+you and not for the other variants:
+
+```bash
+./gradlew :app:assemblePlayRelease :app:assembleSafehavenRelease \
+          :app:assembleFdroidRelease
+```
 
 ### ONNX Runtime is built from source — for every flavour and every channel
 
 **This is the default. `./build-android.sh` compiles ORT; you do not opt in.**
 
 It began as an F-Droid requirement (F-Droid never accepts a prebuilt shared
-library) and was generalised on 2026-08-13, because scoping it to the `foss`
+library) and was generalised on 2026-08-13, because scoping it to the `fdroid`
 flavour was doing harm:
 
 - The two store artifacts carried **different OCR engines** — Play linked pyke's
-  prebuilt, foss compiled its own — so a scan bug could reproduce on one channel
-  and not the other. `full` and `foss` already diverge on GMS; a second axis on
+  prebuilt, fdroid compiled its own — so a scan bug could reproduce on one channel
+  and not the other. `full` and `fdroid` already diverge on GMS; a second axis on
   the OCR engine bought nothing.
-- Only foss-touching PRs built from source, so a broken `ort` bump stayed
+- Only fdroid-touching PRs built from source, so a broken `ort` bump stayed
   invisible until an F-Droid submission, with no recent known-good state to
   bisect against. Building it everywhere fails on the PR that causes it.
 
@@ -544,8 +564,8 @@ before opening a PR:
 
 ```bash
 ./build-android.sh                 # regenerates the git-ignored UniFFI Kotlin
-./gradlew :app:assembleFullDebug :app:assembleFossDebug \
-  :app:testFullDebugUnitTest :app:lintFullDebug
+./gradlew :app:assemblePlayDebug :app:assembleFdroidDebug \
+  :app:testPlayDebugUnitTest :app:lintPlayDebug
 cargo check --bin batch_e2e        # CI builds this bin; it has rotted before
 ```
 

@@ -44,10 +44,10 @@ DEVICE_COUNT=$("$ADB" devices | awk 'NR>1 && $2=="device"' | wc -l | tr -d ' ')
 [ "$DEVICE_COUNT" -ge 1 ] || { echo "no connected device ($ADB devices)"; exit 1; }
 echo "profile: $PROFILE   runs: $RUNS"
 
-# Capitalized names for the Gradle task, which since the full/foss split carries
-# the flavour too: assembleFullDebug / assembleFossRelease. `full` is the default
+# Capitalized names for the Gradle task, which since the flavour split carries
+# the flavour too: assemblePlayDebug / assembleFdroidRelease. `play` is the default
 # because that is the build whose launch latency ships to Play.
-FLAVOR="${FLAVOR:-full}"
+FLAVOR="${FLAVOR:-play}"
 Flavor="$(printf '%s' "${FLAVOR:0:1}" | tr '[:lower:]' '[:upper:]')${FLAVOR:1}"
 VARIANT="$(printf '%s' "${PROFILE:0:1}" | tr '[:lower:]' '[:upper:]')${PROFILE:1}"
 
