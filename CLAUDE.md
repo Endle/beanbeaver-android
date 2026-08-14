@@ -33,11 +33,11 @@ side deliberately has no twin until that comes back.
 | `src/` + `Cargo.toml` | Root Rust crate `beanbeaver-android-ffi-build`: build-only. Pins the **`bb-mobile-ffi`** tag (the library that ships) *and* the `bb-receipt-ffi` tag (for `batch_e2e.rs`) — **the two must agree on the core version**. Hosts two bins — `uniffi-bindgen` (Kotlin codegen) and `batch_e2e` (host harness) — whose **sources live in `shared/`**, compiled here via `[[bin]] path`. `src/lib.rs` is an empty lib target. |
 | `build-android.sh` | Builds core → `.so` + regenerates the Kotlin glue. Rerun after bumping the tag. |
 | `models/` | PP-OCRv5 ONNX (det/rec + textline-orientation). Fetched, **not committed** — `./shared/scripts/fetch-models.sh`. Gradle also falls back to `../models/` when co-located with iOS. |
-| `scripts/` | `android-e2e.sh` (adb batch harness), `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — the F-Droid path, see below). |
+| `scripts/` | `android-e2e.sh` (adb batch harness), `e2e-fixtures.sh` (stitch image + ground truth into one dir), `launch-timing.sh` (cold-launch latency on a real device), `build-ort-android.sh` (ONNX Runtime from source — run automatically by `build-android.sh` for **every** build, see below). |
 | `shared/` | **Git submodule** — [`beanbeaver-mobile-util`](https://github.com/Endle/beanbeaver-mobile-util), the assets iOS and Android genuinely share: `scripts/compare-e2e.py`, `scripts/fetch-models.sh`, `src/bin/uniffi-bindgen.rs`, `src/bin/batch_e2e.rs`. See "The `shared/` submodule" below. |
 | `app/src/test/` | Plain JVM unit tests (`./gradlew :app:testFullDebugUnitTest`) — no emulator, no native lib. Covers the deliberately Context-free logic: the `.xlsx` writer, amount/price normalization, display formatting, and `SpendSummary`'s **projection / re-attachment** (the arithmetic itself moved to Rust — see below). |
 | `tests/receipts_e2e/` | E2E **ground truth only** (`<stem>.expected.json`, same schema/grader as iOS). The images aren't duplicated here — the one public fixture is the app's bundled sample under `app/src/main/assets/samples/`. |
-| `.github/workflows/` | `android-build.yml` (the CI below) and `fdroid.yml` (the F-Droid build, separate because it is slow and narrowly triggered). |
+| `.github/workflows/` | `android-build.yml` (the CI below) and `fdroid.yml` (the F-Droid build — **parked 2026-08-13, `workflow_dispatch` only**). |
 
 **Generated / git-ignored** (rebuilt by `build-android.sh` / Gradle): `bbreceiptkit/src/main/kotlin/uniffi/`, `bbreceiptkit/src/main/jniLibs/`, `app/src/main/assets/models/`, `app/src/main/assets/legal/`, `target/`, `local.properties`.
 
@@ -138,8 +138,10 @@ Two `ubuntu-latest` jobs here, plus a third in its own file (below).
 `:app:lintFullDebug` → **host E2E**: `batch_e2e` scans the bundled fixture and
 `shared/scripts/compare-e2e.py` grades merchant/date/total/items against
 `tests/receipts_e2e/`.
-Cargo, the `ort` prebuilt, the ONNX weights and Gradle are all cached; a warm run
-is a few minutes.
+Cargo, the source-built ORT static libs, the ONNX weights and Gradle are all
+cached; a warm run is a few minutes. A cold ORT compile (~12 min) happens only
+when `ort-sys` or `build-ort-android.sh` changes — which is exactly when a break
+is worth surfacing.
 
 **`release-bundle`** — the path that actually ships, which nothing exercised
 until v0.4.0 reached Play carrying a debug native library. Release-profile
@@ -149,32 +151,33 @@ strip/symbol extraction, and both gates as a finalizer. Unsigned — signing has
 bearing on what the gates read. **This is the only CI coverage R8 has**, since
 `:app:assembleFullDebug` never runs it.
 
-### `fdroid.yml` — the F-Droid build
+### `fdroid.yml` — parked, manual only (2026-08-13)
 
-`fdroid-ort-from-source` compiles ONNX Runtime instead of downloading it and
-builds the **foss** flavour, then asserts both properties rather than trusting the
-wiring: no `libonnxruntime` `DT_NEEDED` and no `aarch64-linux-android` entry in
-ort's download cache, and **zero** `com.google.android.gms` strings in the foss
-dex. Every other job happily downloads a prebuilt and links GMS, so this wiring
-can rot without any of them noticing.
+**It no longer runs on push or PR.** SafeHaven is the near-term target and accepts
+the GMS document scanner, so it and Play both take the `full` build and F-Droid is
+sequenced later. Its `push` trigger also had no `paths:` filter — only its
+`pull_request` one did — so every merge was paying the ~15 min ORT compile.
 
-Its own file so it can have its own triggers: master pushes, `workflow_dispatch`,
-and **only** PRs touching build inputs (`paths:` in the workflow). The ORT compile
-is ~15 min, which is not a tax worth putting on a docs PR.
+Most of what it proved **now runs in `android-build.yml` on every build**, and was
+moved there rather than dropped:
 
-**There is deliberately no cache, and that is the point.** The only thing worth
-caching is the ORT build — which is exactly what this job exists to prove still
-works. A warm run would show that linking succeeds while saying nothing about
-whether ONNX Runtime still *compiles*, and the compile is where breakage lives (a
-bumped `ort`, an upstream CMake change, `re2` moving in or out of
-`EXCLUDE_FROM_ALL`). Nothing that ships depends on it being fast: release builds
-fetch `bb-receipt-ffi` at its pinned tag and build from scratch, and F-Droid's
-buildserver has no cache of ours either. Also no `Swatinem/rust-cache` — the ORT
-archives are a build input outside `target/`, and caching the two independently is
-what wedged beanbeaver-ios's main branch (ios #57).
+- ONNX Runtime compiled from source, plus the assertions that nothing prebuilt
+  was linked (no `libonnxruntime` `DT_NEEDED`, no `aarch64-linux-android` entry in
+  ort's download cache). This is no longer an F-Droid-only property — see below.
+- **Zero** `com.google.android.gms` strings in the foss dex, now checked against
+  the **R8-minified release** APK instead of a debug one, which is strictly
+  stronger: R8 decides what survives, so a keep rule dragging GMS back in is only
+  visible after minification.
+- That the foss flavour still compiles, via `assembleFossRelease`.
 
-If you add a build input, add it to that `paths:` list. A flavour file that slips
-past the filter loses its only ORT-side coverage on that PR.
+What is genuinely only in `fdroid.yml` is the **uncached, from-scratch ORT
+compile**. `android-build.yml` caches the static libs, so it proves ORT still
+*links* and only re-proves that it still *compiles* when `ort-sys` or the recipe
+changes. Run `gh workflow run fdroid.yml` before an F-Droid submission, and after
+an `ort` bump you want a cold rehearsal of.
+
+That is why the file is kept rather than deleted. Its `paths:` list is in git
+history — restore it from there if F-Droid resumes, rather than reconstructing it.
 
 **There is no emulator job, and adding one is not a matter of writing YAML.**
 The app is arm64-v8a only, and no GitHub-hosted runner can run an arm64 AVD:
@@ -230,22 +233,55 @@ Both flavours are built in CI, and `fdroid-ort-from-source` fails if any
 opening a PR** — a flavour that only exists in one source set is exactly the kind
 of thing that compiles for you and not for the other variant.
 
-### ONNX Runtime from source (the F-Droid path)
+### ONNX Runtime is built from source — for every flavour and every channel
 
-`ort`'s default `download-binaries` fetches a precompiled static ONNX Runtime from
-pyke's CDN. **F-Droid never accepts a prebuilt shared library**, so submission needs
-a build that compiles it. That build exists and is gated by the
-`fdroid-ort-from-source` CI job:
+**This is the default. `./build-android.sh` compiles ORT; you do not opt in.**
+
+It began as an F-Droid requirement (F-Droid never accepts a prebuilt shared
+library) and was generalised on 2026-08-13, because scoping it to the `foss`
+flavour was doing harm:
+
+- The two store artifacts carried **different OCR engines** — Play linked pyke's
+  prebuilt, foss compiled its own — so a scan bug could reproduce on one channel
+  and not the other. `full` and `foss` already diverge on GMS; a second axis on
+  the OCR engine bought nothing.
+- Only foss-touching PRs built from source, so a broken `ort` bump stayed
+  invisible until an F-Droid submission, with no recent known-good state to
+  bisect against. Building it everywhere fails on the PR that causes it.
+
+Measured on the Tab A9+ (2026-08-13), source-built vs prebuilt: **byte-identical
+parse** (all 38 rendered fields of the bundled Costco receipt — `$72.41`, subtotal
+`$69.03`, tax `$3.38`), APK **51.0 → 52.0 MB** (+1.9%), `.so` 25.6 → 26.5 MB. Note
+the size goes **up**: the old "89 MB vs pyke's 113 MB" figure compared intermediate
+`.a` files, not the linked output.
+
+Two escape hatches, in order of preference:
 
 ```bash
-ORT_ANDROID_LIB_LOCATION="$(./scripts/build-ort-android.sh --print-lib-location)" \
-  ./build-android.sh
+ORT_ANDROID_LIB_LOCATION=<dir> ./build-android.sh   # link this tree (CI's cache)
+BB_ORT=prebuilt ./build-android.sh                  # fall back to pyke's CDN
 ```
 
-Verified 2026-08-09: it links, and the resulting APK passes the pilot E2E on an
-arm64 emulator with output identical to a prebuilt-ORT build (`COSTCO 2026-03-01
-$72.41`, 7 items). ~3.5 min to compile ORT on a 10-core M-series; 1.4 GB under
-`target/ort/` (git-ignored).
+`BB_ORT=prebuilt` is for emergencies — an upstream break that would otherwise
+block a release. It reintroduces the divergence, so it should not outlive the fix.
+
+First build is ~4-6 min (clone + compile); after that `target/ort/` (git-ignored,
+2.2 GB) makes it a no-op.
+
+**CI caches only the `.a` files, not the tree.** `build-ort-android.sh`
+short-circuits on `libonnxruntime_common.a` + `_deps/re2-build/libre2.a`, both
+`.a`, so restoring just those skips the compile — verified: a tree holding nothing
+but those 81 files (112 MB) links and yields a statically linked `.so`. The full
+tree is 2.2 GB (892 MB checkout + 495 MB build), which would eat most of the
+repo's 10 GB Actions budget. `ORT_BUILD_DIR` is therefore moved **out of
+`target/`** in CI, so it stays out of the cargo cache entry.
+
+The ORT cache is a **separate** entry from the cargo one, and unlike the pyke
+pairing that is safe: that rule exists because a restored `target/` suppresses the
+download that would refill an evicted dir, and nothing else can produce it. Here
+the producer is unconditional — `build-android.sh` always runs
+`build-ort-android.sh`, which rebuilds what is missing. A miss costs ~12 min; it
+cannot wedge.
 
 Four things here are non-obvious, and three of them fail *late*:
 

@@ -1,11 +1,39 @@
 name: F-Droid build
 
+# ⚠️ MANUAL ONLY — this no longer runs on push or PR. See "Why it is parked".
+#
 # The build F-Droid would run, kept working by running it.
 #
 # Split out of android-build.yml deliberately. F-Droid never accepts a prebuilt
 # shared library, so this compiles ONNX Runtime from source and builds the `foss`
 # flavour — and that compile is ~15 minutes, which is not a tax worth putting on
 # a documentation PR. Its own file is what lets it have its own triggers.
+#
+# ## Why it is parked (2026-08-13)
+#
+# SafeHaven is the near-term target and it accepts the GMS document scanner, so
+# both it and Play take the `full` build; F-Droid is sequenced later. This job
+# was also charging every merge for that ~15 min compile, because its `push`
+# trigger — unlike its `pull_request` one — carried no path filter.
+#
+# **Most of what it proved now runs in android-build.yml on every build**, and is
+# not lost by parking this:
+#
+#   - ONNX Runtime compiled from source. It is no longer an F-Droid-only
+#     property: it is how the library that ships to *every* channel is built, so
+#     android-build.yml compiles it and asserts nothing prebuilt was linked.
+#   - No Play services in the foss APK — moved there too, and strengthened, since
+#     it now runs against the R8-minified release APK rather than a debug one.
+#   - The foss flavour still compiling, via `assembleFossRelease`.
+#
+# What is genuinely only here is the **uncached, from-scratch ORT compile**.
+# android-build.yml caches the static libs, so it proves ORT still *links*, and
+# only re-proves that it still *compiles* when ort-sys or the recipe changes.
+# That is the right trade while F-Droid is parked, and it is why this file is
+# kept rather than deleted: run it before any F-Droid submission, and after any
+# ort bump you want a cold rehearsal of.
+#
+# Run it from the Actions tab, or:  gh workflow run fdroid.yml
 #
 # There is no cache, and that is the point rather than an omission. The only
 # thing a cache could store is the ORT build — which is exactly what this job
@@ -26,26 +54,9 @@ name: F-Droid build
 # fingerprint says "already linked" while the archives it points at are gone.
 
 on:
-  push:
-    branches: [master]
-  # Only PRs that can actually affect this build. Everything listed either feeds
-  # the ORT compile, the link, or the foss flavour; a PR touching only Kotlin UI
-  # or docs is covered by android-build.yml.
-  pull_request:
-    paths:
-      - 'scripts/build-ort-android.sh'
-      # The submodule pointer: bumping shared/ can move fetch-models.sh or the
-      # uniffi-bindgen bin this build compiles.
-      - 'shared'
-      - '.gitmodules'
-      - 'build-android.sh'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'app/build.gradle.kts'
-      - 'app/src/foss/**'
-      - 'bbreceiptkit/**'
-      - 'gradle.properties'
-      - '.github/workflows/fdroid.yml'
+  # Manual only. The push/pull_request triggers were removed 2026-08-13 — see the
+  # header. The path list they used is preserved in git history; restore it from
+  # there rather than reconstructing it if F-Droid work resumes.
   workflow_dispatch:
 
 concurrency:
