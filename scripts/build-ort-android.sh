@@ -19,14 +19,12 @@
 # module, and the pinned Android NDK (the same one build-android.sh uses -- see
 # bb.ndkVersion in gradle.properties).
 #
-# `flatbuffers` is required by the reduced-operator build (the default): ORT's
-# reduce_op_kernels.py imports util.parse_config, which only exists when
-# flatbuffers is importable, and build.py otherwise dies with a bare
-# ImportError before compiling anything.
+# `flatbuffers` is only needed for the EXPERIMENTAL reduced-operator build
+# (BB_ORT_REDUCED_OPS=1), which is OFF by default because it does not work yet
+# -- see scripts/ort-required-ops.config. The default full-operator build needs
+# none of it.
 #
 #   python3 -m pip install flatbuffers
-#
-# BB_ORT_REDUCED_OPS=0 builds the full operator set and needs none of it.
 set -euo pipefail
 
 ANDROID_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -166,28 +164,46 @@ RE2_LIB="$LIB_LOCATION/_deps/re2-build/libre2.a"
 ORT_STAMP="$LIB_LOCATION/.bb-ort-recipe"
 ort_recipe_id() {
   local ops_hash="none"
-  if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] && [ -f "$OPS_CONFIG" ]; then
+  if [ "${BB_ORT_REDUCED_OPS:-0}" = "1" ] && [ -f "$OPS_CONFIG" ]; then
     ops_hash="$(shasum -a 256 "$OPS_CONFIG" | awk '{print $1}')"
   fi
-  echo "ort=$ORT_VERSION abi=$ANDROID_ABI api=$ANDROID_API reduced=${BB_ORT_REDUCED_OPS:-1} ops=$ops_hash"
+  echo "ort=$ORT_VERSION abi=$ANDROID_ABI api=$ANDROID_API reduced=${BB_ORT_REDUCED_OPS:-0} ops=$ops_hash"
 }
 WANT_RECIPE="$(ort_recipe_id)"
 
-# All three, not just the ORT archive: a tree missing libre2.a is not yet usable
-# (see the re2 note below), and one built to a different recipe is worse than
-# missing. This is also what lets CI restore just the .a files from a cache and
-# skip the build -- the stamp is written next to them and restored with them.
-if [ "$PRINT_ONLY" = 1 ] && [ -f "$LIB_LOCATION/libonnxruntime_common.a" ] \
-   && [ -f "$RE2_LIB" ]; then
+# A tree whose recipe does not match is WIPED, not rebuilt in place, and that is
+# the whole point rather than caution.
+#
+# ONNX Runtime applies --include_ops_by_config at CMake *configure* time: it runs
+# reduce_op_kernels.py once and writes generated registration headers into the
+# build tree. CMake has no dependency edge from those headers back to the config
+# file, so building again into a configured tree happily reuses the PREVIOUS
+# operator set. Measured: correcting the operator list and rebuilding took 31 s
+# (a relink), produced a byte-identical .so, and still failed on device with
+# `Could not find an implementation for Gemm(13)` -- an operator the corrected
+# list contains. Only a from-scratch configure picks it up.
+#
+# So a recipe change costs a full ~4 minute rebuild. That is the honest price of
+# changing what the engine contains, and it is far cheaper than the alternative,
+# which is a green build that dies on the first scan.
+if [ -f "$LIB_LOCATION/libonnxruntime_common.a" ] || [ -d "$ORT_OUT" ]; then
   if [ -f "$ORT_STAMP" ] && [ "$(cat "$ORT_STAMP")" = "$WANT_RECIPE" ]; then
-    emit "$LIB_LOCATION"
-    exit 0
+    # Matching tree. In --print-lib-location mode there is nothing to do; this is
+    # also what lets CI restore just the .a files plus the stamp and skip the
+    # compile. libre2.a is checked too: a tree missing it is not yet usable (see
+    # the re2 note below) and short-circuiting would hide that.
+    if [ "$PRINT_ONLY" = 1 ] && [ -f "$RE2_LIB" ]; then
+      emit "$LIB_LOCATION"
+      exit 0
+    fi
+  elif [ -d "$ORT_OUT" ]; then
+    echo ">> ONNX Runtime in $ORT_OUT was built to a different recipe -- rebuilding from scratch" >&2
+    echo "   have: $( [ -f "$ORT_STAMP" ] && cat "$ORT_STAMP" || echo '(no stamp: predates this check)')" >&2
+    echo "   want: $WANT_RECIPE" >&2
+    echo "   (a configured tree reuses its generated operator registrations, so" >&2
+    echo "    an in-place rebuild would silently keep the old operator set)" >&2
+    rm -rf "$ORT_OUT"
   fi
-  # Fall through and rebuild. Say why: a silent 4-minute recompile that the
-  # caller did not ask for is its own kind of confusing.
-  echo ">> ONNX Runtime in $LIB_LOCATION was built to a different recipe -- rebuilding" >&2
-  echo "   have: $( [ -f "$ORT_STAMP" ] && cat "$ORT_STAMP" || echo '(no stamp: predates this check)')" >&2
-  echo "   want: $WANT_RECIPE" >&2
 fi
 
 for tool in git cmake ninja python3; do
@@ -230,10 +246,11 @@ fi
 # ai.onnx.ml domain (tree ensembles, SVMs, label encoders) that PP-OCRv5 never
 # touches.
 #
-# The op list is COMMITTED, at $OPS_CONFIG, rather than generated here: deriving
-# it needs python3 + the `onnx` module, which is a build dependency this repo
-# does not otherwise have and F-Droid would have to satisfy too. Regenerate it
-# whenever the models change -- see the header of that file for the command.
+# OFF BY DEFAULT, because it does not work yet. Enabling it produces a library
+# that links, passes CI and then fails on the first scan with "Could not find an
+# implementation for <Op>". The operator list cannot currently be derived
+# reliably -- see the long note in scripts/ort-required-ops.config. Set
+# BB_ORT_REDUCED_OPS=1 only to continue that investigation.
 #
 # The failure mode if it goes stale is a *runtime* one: session creation fails
 # with "Could not find an implementation for <Op>", on a device, in the OCR
@@ -245,12 +262,17 @@ fi
 # BB_ORT_REDUCED_OPS=0 builds the full operator set, for bisecting a suspected
 # missing-operator failure against an otherwise identical engine.
 ops_flags=()
-if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ]; then
+if [ "${BB_ORT_REDUCED_OPS:-0}" = "1" ]; then
   [ -f "$OPS_CONFIG" ] || { echo "error: missing $OPS_CONFIG" >&2; exit 1; }
   ops_flags+=(--include_ops_by_config "$OPS_CONFIG" --disable_ml_ops)
-  echo ">> reduced operator build (ops: $OPS_CONFIG)"
+  cat >&2 <<'WARN'
+>> reduced operator build -- EXPERIMENTAL, KNOWN BROKEN
+   The committed operator list is incomplete and the app fails on the first
+   scan with "Could not find an implementation for <Op>". Do not ship this.
+   See scripts/ort-required-ops.config for why it is hard to get right.
+WARN
 else
-  echo ">> full operator build (BB_ORT_REDUCED_OPS=0)"
+  echo ">> full operator build"
 fi
 
 echo ">> building (several minutes; ~3.5 min on a 10-core M-series, longer on CI)"

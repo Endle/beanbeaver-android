@@ -375,6 +375,33 @@ step_build_native_libs() {
       echo "   ONNX Runtime: prebuilt from pyke's CDN (BB_ORT=prebuilt)"
     fi
 
+    # CARGO DOES NOT KNOW THE ONNX RUNTIME ARCHIVES ARE BUILD INPUTS.
+    #
+    # ort-sys's fingerprint covers ORT_LIB_LOCATION's *path*, not the bytes at
+    # the end of it. Rebuild ORT in place -- different operators, different
+    # version, anything -- and cargo sees an unchanged environment, skips the
+    # relink, and the .so keeps whatever engine it was linked against before.
+    # This cost hours: several rounds of "rebuild ORT, measure, unchanged" all
+    # measured the same stale library, including one that looked like proof a
+    # config change had no effect.
+    #
+    # So the recipe the .so was actually linked against is recorded here, and a
+    # change busts just ort-sys for this target. `cargo clean -p ort-sys` alone
+    # is not enough: without --target it cleans the *host* artifacts, which is
+    # the wrong ones and looks like it worked.
+    local ort_recipe="none" ort_linked_stamp="$CARGO_TARGET_DIR/.bb-ort-linked-$abi"
+    [ -n "$ort_lib" ] && [ -f "$ort_lib/.bb-ort-recipe" ] \
+      && ort_recipe="$(cat "$ort_lib/.bb-ort-recipe")"
+    if [ ! -f "$ort_linked_stamp" ] || [ "$(cat "$ort_linked_stamp")" != "$ort_recipe" ]; then
+      if [ -f "$ort_linked_stamp" ]; then
+        echo "   ONNX Runtime changed since the last link — forcing ort-sys to relink"
+        cargo clean -q -p ort-sys --target "$target" \
+          $([ "$PROFILE" = "release" ] && echo --release) 2>/dev/null || true
+      fi
+      mkdir -p "$CARGO_TARGET_DIR"
+      printf '%s\n' "$ort_recipe" > "$ort_linked_stamp"
+    fi
+
     # ${a[@]+"${a[@]}"} — expanding an empty array as "${a[@]}" is an unbound
     # variable under `set -u` in bash 3.2, which is what /usr/bin/env bash still
     # resolves to on a stock macOS.
@@ -501,7 +528,7 @@ EOF
 # rather than parses.
 # --------------------------------------------------------------------------
 step_assert_ort_ops_fresh() {
-  [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] || return 0
+  [ "${BB_ORT_REDUCED_OPS:-0}" = "1" ] || return 0
   "$ANDROID_ROOT/scripts/assert-ort-ops-config-fresh.sh"
 }
 
