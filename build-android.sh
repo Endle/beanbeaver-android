@@ -225,36 +225,72 @@ step_ensure_rust_targets() {
 }
 
 # --------------------------------------------------------------------------
-# Step 5 — resolve the ONNX Runtime to link, echoing its directory.
+# Step 5 — resolve the ONNX Runtime to link, into the global ORT_LIB_DIR.
 #
-# Empty output means "let ort download pyke's prebuilt" (BB_ORT=prebuilt).
+# Empty means "let ort download pyke's prebuilt", and that is now reachable ONLY
+# by asking for it (BB_ORT=prebuilt). It used to be reachable by accident, which
+# is the bug this shape exists to prevent — see below.
+#
+# NOT `dir=$(resolve_ort_lib …)`. A failure inside a command substitution does
+# not reliably abort under `set -e`: the subshell dies, its status is discarded
+# at the assignment, and the caller carries on with an empty string. Verified on
+# bash 5.3 with exactly the nesting this file had. That is not academic — it
+# shipped: when the reduced-operator build added a python `flatbuffers`
+# dependency, every machine without it had build-ort-android.sh die, resolve
+# return "", and the build silently fall back to pyke's CDN prebuilt, printing
+# "ONNX Runtime: prebuilt from pyke's CDN (BB_ORT=prebuilt)" and exiting 0 on a
+# build that had asked for source. The comment that used to live here claimed
+# `set -e` covered this. It did not.
+#
+# Writing to a global instead means `exit 1` below happens in the main shell and
+# actually stops the build.
 # --------------------------------------------------------------------------
+ORT_LIB_DIR=""    # set by resolve_ort_lib; "" means pyke's CDN prebuilt
+
 resolve_ort_lib() {
-  local abi="$1" dir="${ORT_ANDROID_LIB_LOCATION:-}"
-  if [ -z "$dir" ] && [ "$BB_ORT" != "prebuilt" ]; then
-    # --print-lib-location builds the tree when cold and just reprints the path
-    # when warm, so this is a no-op on a repeat build. ANDROID_ABI is forwarded
-    # because the tree is per-ABI, and the NDK because both scripts must agree
-    # on it — build-ort-android.sh refuses a mismatch rather than quietly
-    # compiling ORT against a different one than cargo uses.
-    echo ">> ONNX Runtime from source (BB_ORT=prebuilt to opt out)" >&2
-    dir="$(ANDROID_NDK_HOME="$NDK" ANDROID_ABI="$abi" \
-      "$ANDROID_ROOT/scripts/build-ort-android.sh" --print-lib-location)"
+  local abi="$1"
+  ORT_LIB_DIR="${ORT_ANDROID_LIB_LOCATION:-}"
+  [ -n "$ORT_LIB_DIR" ] && return 0
+  [ "$BB_ORT" = "prebuilt" ] && { ORT_LIB_DIR=""; return 0; }
+
+  # --print-lib-location builds the tree when cold and reprints the path when
+  # warm *and built to the same recipe*, so this is a no-op on a repeat build.
+  # ANDROID_ABI is forwarded because the tree is per-ABI, and the NDK because
+  # both scripts must agree on it — build-ort-android.sh refuses a mismatch
+  # rather than quietly compiling ORT against a different one than cargo uses.
+  echo ">> ONNX Runtime from source (BB_ORT=prebuilt to opt out)" >&2
+  if ! ORT_LIB_DIR="$(ANDROID_NDK_HOME="$NDK" ANDROID_ABI="$abi" \
+      "$ANDROID_ROOT/scripts/build-ort-android.sh" --print-lib-location)"; then
+    cat >&2 <<EOF
+error: building ONNX Runtime from source failed.
+
+  Not falling back to pyke's prebuilt. That fallback is what this build is for:
+  every channel must link the same engine, and F-Droid will not accept a
+  downloaded one. Silently swapping it would ship a different OCR engine than
+  the one tested.
+
+  If the failure above is a missing python module, the reduced-operator build
+  needs \`flatbuffers\`:
+      python3 -m pip install flatbuffers
+
+  To build a full-operator ORT instead (no python module needed):
+      BB_ORT_REDUCED_OPS=0 $0
+  To deliberately use the prebuilt anyway:
+      BB_ORT=prebuilt $0
+EOF
+    exit 1
   fi
-  echo "$dir"
+  if [ -z "$ORT_LIB_DIR" ]; then
+    echo "error: build-ort-android.sh succeeded but printed no path." >&2
+    exit 1
+  fi
 }
 
-# Validating the directory is the caller's job, not resolve_ort_lib's, and that
-# split is deliberate. resolve_ort_lib is read through $(…), so an `exit 1`
-# inside it kills only the subshell; the script aborts today purely because the
-# call site happens to be a bare assignment, which lets `set -e` see the
-# substitution's status. Fold that into one line as
-# `local ort_lib="$(resolve_ort_lib "$abi")"` and `local`'s own exit status
-# masks it — the error prints and the build carries on with a bad directory.
-# Checking out here needs no such reasoning to stay correct.
+# Validating the directory is a separate step from producing it, so that neither
+# has to reason about the other's exit status.
 assert_ort_lib_dir() {
   local dir="$1"
-  [ -n "$dir" ] || return 0   # empty = pyke's CDN prebuilt; nothing to check
+  [ -n "$dir" ] || return 0   # empty = pyke's CDN prebuilt, explicitly asked for
   if [ ! -f "$dir/libonnxruntime_common.a" ]; then
     echo "error: no libonnxruntime_common.a in $dir" >&2
     echo "  This must be the CMake binary dir (…/build-<abi>/Release), not its parent." >&2
@@ -324,8 +360,10 @@ step_build_native_libs() {
     target="$(abi_to_target "$abi")"
     echo ">> building $CRATE for $target ($PROFILE) [abi=$abi]"
 
-    # Two statements, not one — see the comment on assert_ort_lib_dir.
-    ort_lib="$(resolve_ort_lib "$abi")"
+    # Called directly, NOT through $(…) — see the comment on resolve_ort_lib for
+    # why the result comes back in a global. It sets ORT_LIB_DIR or exits.
+    resolve_ort_lib "$abi"
+    ort_lib="$ORT_LIB_DIR"
     assert_ort_lib_dir "$ort_lib"
     # `env VAR=… cargo` rather than an exported VAR: see the header on why
     # ORT_LIB_LOCATION must not survive into the host bindgen build.
@@ -335,6 +373,33 @@ step_build_native_libs() {
       ort_env=(env "ORT_LIB_LOCATION=$ort_lib")
     else
       echo "   ONNX Runtime: prebuilt from pyke's CDN (BB_ORT=prebuilt)"
+    fi
+
+    # CARGO DOES NOT KNOW THE ONNX RUNTIME ARCHIVES ARE BUILD INPUTS.
+    #
+    # ort-sys's fingerprint covers ORT_LIB_LOCATION's *path*, not the bytes at
+    # the end of it. Rebuild ORT in place -- different operators, different
+    # version, anything -- and cargo sees an unchanged environment, skips the
+    # relink, and the .so keeps whatever engine it was linked against before.
+    # This cost hours: several rounds of "rebuild ORT, measure, unchanged" all
+    # measured the same stale library, including one that looked like proof a
+    # config change had no effect.
+    #
+    # So the recipe the .so was actually linked against is recorded here, and a
+    # change busts just ort-sys for this target. `cargo clean -p ort-sys` alone
+    # is not enough: without --target it cleans the *host* artifacts, which is
+    # the wrong ones and looks like it worked.
+    local ort_recipe="none" ort_linked_stamp="$CARGO_TARGET_DIR/.bb-ort-linked-$abi"
+    [ -n "$ort_lib" ] && [ -f "$ort_lib/.bb-ort-recipe" ] \
+      && ort_recipe="$(cat "$ort_lib/.bb-ort-recipe")"
+    if [ ! -f "$ort_linked_stamp" ] || [ "$(cat "$ort_linked_stamp")" != "$ort_recipe" ]; then
+      if [ -f "$ort_linked_stamp" ]; then
+        echo "   ONNX Runtime changed since the last link — forcing ort-sys to relink"
+        cargo clean -q -p ort-sys --target "$target" \
+          $([ "$PROFILE" = "release" ] && echo --release) 2>/dev/null || true
+      fi
+      mkdir -p "$CARGO_TARGET_DIR"
+      printf '%s\n' "$ort_recipe" > "$ort_linked_stamp"
     fi
 
     # ${a[@]+"${a[@]}"} — expanding an empty array as "${a[@]}" is an unbound
@@ -463,7 +528,7 @@ EOF
 # rather than parses.
 # --------------------------------------------------------------------------
 step_assert_ort_ops_fresh() {
-  [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] || return 0
+  [ "${BB_ORT_REDUCED_OPS:-0}" = "1" ] || return 0
   "$ANDROID_ROOT/scripts/assert-ort-ops-config-fresh.sh"
 }
 
