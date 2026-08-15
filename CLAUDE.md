@@ -186,12 +186,31 @@ arm64-only APK; the Apple-Silicon macOS runners have no HVF, because Apple's
 Virtualization Framework doesn't nest (an arm64 AVD dies `HV_UNSUPPORTED` /
 SIGSEGV); Linux arm64 runners have no KVM either. So the **JNI seam is the one
 thing CI cannot prove** — the host E2E covers the same core, models, fixture and
-grader, but not `.so` loading, the UniFFI checksum or JNA. Prove that on real
-arm64 hardware: locally with
+grader, but not `.so` loading, the UniFFI checksum, JNA, or whether ONNX Runtime
+can open a session at all.
+
+**That is a fact about GitHub's runners, not about the dev machine.** An Apple
+Silicon Mac runs an **arm64 AVD natively**, and this repo's own "Build & run"
+section above tells you to install one. So this needs no physical device and
+takes about two minutes:
 
 ```bash
 ./scripts/android-e2e.sh "$(./scripts/e2e-fixtures.sh)" --pilot
 ```
+
+Read that distinction carefully, because collapsing it has cost a broken master
+once: #32 shipped a reduced-operator ONNX Runtime that could not open a session
+(`Could not find an implementation for com.microsoft.FusedConv`) on the
+reasoning that no emulator could run this app. CI passed twice; the AVD found it
+on the first run. Reverted in #34.
+
+**Anything touching the native seam or the OCR engine — a core tag bump, an
+`ort` change, a build-flag change — is not verified until this has actually
+scanned a receipt.** The host E2E cannot substitute: it links pyke's *stock*
+prebuilt ORT, which has every operator the packaged library might be missing.
+Neither can symbol inspection (a broken reduced build still shows ~50
+`FusedConv` symbols — reduction removes kernel *registrations*, not class
+definitions).
 
 and, if it ever needs to be automatic, via a self-hosted arm64 Mac runner or a
 device farm (Firebase Test Lab — which would want an instrumented `androidTest`
