@@ -104,6 +104,14 @@ jobs:
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # Needed by --include_ops_by_config: ORT's reduce_op_kernels.py imports
+      # util.parse_config, which only exists when flatbuffers is importable, and
+      # build.py otherwise dies with a bare ImportError before compiling
+      # anything. This job is the uncached from-scratch rehearsal, so it is the
+      # one that would catch a missing build dep — it needs the dep itself.
+      - name: Install ONNX Runtime build deps (reduced-operator build)
+        run: python3 -m pip install --upgrade flatbuffers
+
       - name: Cache OCR models
         uses: actions/cache@v4
         with:

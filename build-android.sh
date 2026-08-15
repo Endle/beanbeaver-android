@@ -455,7 +455,20 @@ Next:
 EOF
 }
 
+# --------------------------------------------------------------------------
+# Step 0 — the ONNX Runtime we build is cut down to the operators the shipped
+# PP-OCRv5 models use, so a model that changed without its operator list being
+# regenerated would fail at OCR time on a device and nowhere earlier. Costs
+# milliseconds; see scripts/assert-ort-ops-config-fresh.sh for why it hashes
+# rather than parses.
+# --------------------------------------------------------------------------
+step_assert_ort_ops_fresh() {
+  [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] || return 0
+  "$ANDROID_ROOT/scripts/assert-ort-ops-config-fresh.sh"
+}
+
 main() {
+  step_assert_ort_ops_fresh
   step_resolve_ndk
   step_resolve_host_toolchain
   step_write_cargo_config

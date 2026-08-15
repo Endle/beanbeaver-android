@@ -121,6 +121,15 @@ jobs:
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # `flatbuffers` is what --include_ops_by_config needs: ORT's
+      # reduce_op_kernels.py imports util.parse_config, which is only defined
+      # when flatbuffers is importable. Without it build.py dies with a bare
+      # ImportError long before any C++ compiles. It is NOT needed to *read* the
+      # committed op list by hand, only to apply it, so it is a build-host
+      # dependency and not one for anyone editing the config.
+      - name: Install ONNX Runtime build deps (reduced-operator build)
+        run: python3 -m pip install --upgrade flatbuffers
+
       # Keyed on what actually determines the output: the recipe, and the
       # ort-sys version — build-ort-android.sh derives the ONNX Runtime tag from
       # ort-sys's own dist.txt rather than hardcoding it. Keying on all of
@@ -150,7 +159,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ort/build-*/Release/**/*.a
-          key: ort-src-${{ runner.os }}-${{ env.ORT_SYS_VERSION }}-${{ hashFiles('scripts/build-ort-android.sh') }}
+          # ort-required-ops.config is in the key, not just the script: the engine
+          # is compiled with --include_ops_by_config, so regenerating that file
+          # changes what the .a files contain while leaving build-ort-android.sh
+          # untouched. A hit would then restore an engine cut for the *previous*
+          # models — a failure that surfaces only at OCR time, on a device.
+          key: ort-src-${{ runner.os }}-${{ env.ORT_SYS_VERSION }}-${{ hashFiles('scripts/build-ort-android.sh', 'scripts/ort-required-ops.config') }}
 
       # ~19 MB of ONNX weights pulled from a fixed release tag, so the key only
       # has to change when the script points at a different release.
@@ -323,6 +337,15 @@ jobs:
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # `flatbuffers` is what --include_ops_by_config needs: ORT's
+      # reduce_op_kernels.py imports util.parse_config, which is only defined
+      # when flatbuffers is importable. Without it build.py dies with a bare
+      # ImportError long before any C++ compiles. It is NOT needed to *read* the
+      # committed op list by hand, only to apply it, so it is a build-host
+      # dependency and not one for anyone editing the config.
+      - name: Install ONNX Runtime build deps (reduced-operator build)
+        run: python3 -m pip install --upgrade flatbuffers
+
       - name: Derive the ort-sys version
         run: |
           set -euo pipefail
@@ -334,7 +357,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ort/build-*/Release/**/*.a
-          key: ort-src-${{ runner.os }}-${{ env.ORT_SYS_VERSION }}-${{ hashFiles('scripts/build-ort-android.sh') }}
+          # ort-required-ops.config is in the key, not just the script: the engine
+          # is compiled with --include_ops_by_config, so regenerating that file
+          # changes what the .a files contain while leaving build-ort-android.sh
+          # untouched. A hit would then restore an engine cut for the *previous*
+          # models — a failure that surfaces only at OCR time, on a device.
+          key: ort-src-${{ runner.os }}-${{ env.ORT_SYS_VERSION }}-${{ hashFiles('scripts/build-ort-android.sh', 'scripts/ort-required-ops.config') }}
 
       - name: Cache OCR models
         uses: actions/cache@v4
