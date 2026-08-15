@@ -149,13 +149,45 @@ echo ">> NDK: $NDK"
 LIB_LOCATION="$ORT_OUT/Release"
 RE2_LIB="$LIB_LOCATION/_deps/re2-build/libre2.a"
 
-# Both files, not just the ORT one: a tree missing libre2.a is not yet usable
-# (see the re2 note below), and short-circuiting here would hide that. This is
-# also what lets CI restore just the .a files from a cache and skip the build.
+# --- what those .a files were built FROM ------------------------------------
+#
+# The short-circuit below used to test only that the archives exist, which is
+# not the same question. Static libs carry no record of the flags that produced
+# them, so an existing tree built with a different operator set looked identical
+# to a correct one and was silently linked. That actually happened: after the
+# reduced-operator build landed, every checkout with a warm target/ort kept
+# linking its old full-operator archives, producing a 21.4 MB .so instead of
+# 13.7 MB, with the build reporting complete success. Nothing downstream could
+# notice -- the app runs fine, it is just 7.6 MB bigger than it should be.
+#
+# So the tree records its own recipe, and a mismatch rebuilds. The stamp covers
+# the ONNX Runtime version, whether operator reduction was on, and the contents
+# of the operator list.
+ORT_STAMP="$LIB_LOCATION/.bb-ort-recipe"
+ort_recipe_id() {
+  local ops_hash="none"
+  if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] && [ -f "$OPS_CONFIG" ]; then
+    ops_hash="$(shasum -a 256 "$OPS_CONFIG" | awk '{print $1}')"
+  fi
+  echo "ort=$ORT_VERSION abi=$ANDROID_ABI api=$ANDROID_API reduced=${BB_ORT_REDUCED_OPS:-1} ops=$ops_hash"
+}
+WANT_RECIPE="$(ort_recipe_id)"
+
+# All three, not just the ORT archive: a tree missing libre2.a is not yet usable
+# (see the re2 note below), and one built to a different recipe is worse than
+# missing. This is also what lets CI restore just the .a files from a cache and
+# skip the build -- the stamp is written next to them and restored with them.
 if [ "$PRINT_ONLY" = 1 ] && [ -f "$LIB_LOCATION/libonnxruntime_common.a" ] \
    && [ -f "$RE2_LIB" ]; then
-  emit "$LIB_LOCATION"
-  exit 0
+  if [ -f "$ORT_STAMP" ] && [ "$(cat "$ORT_STAMP")" = "$WANT_RECIPE" ]; then
+    emit "$LIB_LOCATION"
+    exit 0
+  fi
+  # Fall through and rebuild. Say why: a silent 4-minute recompile that the
+  # caller did not ask for is its own kind of confusing.
+  echo ">> ONNX Runtime in $LIB_LOCATION was built to a different recipe -- rebuilding" >&2
+  echo "   have: $( [ -f "$ORT_STAMP" ] && cat "$ORT_STAMP" || echo '(no stamp: predates this check)')" >&2
+  echo "   want: $WANT_RECIPE" >&2
 fi
 
 for tool in git cmake ninja python3; do
@@ -255,6 +287,11 @@ if [ ! -f "$RE2_LIB" ]; then
   cmake --build "$LIB_LOCATION" --target re2
 fi
 [ -f "$RE2_LIB" ] || { echo "error: re2 target produced no $RE2_LIB" >&2; exit 1; }
+
+# Record what this tree was built from, so the short-circuit above can tell a
+# reusable tree from one built to a different recipe. Written last, after every
+# check that could still fail, so a half-built tree is never stamped as good.
+printf '%s\n' "$WANT_RECIPE" > "$ORT_STAMP"
 
 if [ "$PRINT_ONLY" = 1 ]; then
   emit "$LIB_LOCATION"

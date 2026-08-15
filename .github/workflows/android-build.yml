@@ -158,7 +158,13 @@ jobs:
       - name: Cache ONNX Runtime (built from source)
         uses: actions/cache@v4
         with:
-          path: .ort/build-*/Release/**/*.a
+          # The recipe stamp is cached alongside the archives, not just the .a
+          # files. build-ort-android.sh reuses a tree only when the stamp matches
+          # the operator list and ORT version it is about to build for, so a
+          # restore without it would rebuild from scratch every run.
+          path: |
+            .ort/build-*/Release/**/*.a
+            .ort/build-*/Release/.bb-ort-recipe
           # ort-required-ops.config is in the key, not just the script: the engine
           # is compiled with --include_ops_by_config, so regenerating that file
           # changes what the .a files contain while leaving build-ort-android.sh
@@ -356,7 +362,13 @@ jobs:
       - name: Cache ONNX Runtime (built from source)
         uses: actions/cache@v4
         with:
-          path: .ort/build-*/Release/**/*.a
+          # The recipe stamp is cached alongside the archives, not just the .a
+          # files. build-ort-android.sh reuses a tree only when the stamp matches
+          # the operator list and ORT version it is about to build for, so a
+          # restore without it would rebuild from scratch every run.
+          path: |
+            .ort/build-*/Release/**/*.a
+            .ort/build-*/Release/.bb-ort-recipe
           # ort-required-ops.config is in the key, not just the script: the engine
           # is compiled with --include_ops_by_config, so regenerating that file
           # changes what the .a files contain while leaving build-ort-android.sh
