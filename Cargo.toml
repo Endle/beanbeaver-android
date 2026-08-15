@@ -23,6 +23,30 @@ path = "shared/src/bin/uniffi-bindgen.rs"
 name = "batch_e2e"
 path = "shared/src/bin/batch_e2e.rs"
 
+# The profile the shipped .so is built with. Cargo honours `[profile.*]` only in
+# the workspace root, and this package is that root for everything below it --
+# so these two lines apply to bb-mobile-ffi, bb-receipt-ffi and every crate they
+# pull in. Without them cargo's defaults (no LTO, 16 codegen units) applied, and
+# nothing here had ever set them.
+#
+# Measured on arm64-v8a, stripped exactly as AGP strips it:
+#   26,500,968 -> 25,408,400 bytes  (-1.07 MiB, -4.1%)
+# The .so is stored *uncompressed* in the APK (useLegacyPackaging = false, for
+# 16 KB page alignment), so every byte saved here is a byte off the download.
+#
+# Only the ~5 MB of Rust in the library responds to this; the other ~12 MB of
+# code is ONNX Runtime, ONNX, Eigen and protobuf, compiled by CMake in
+# scripts/build-ort-android.sh and untouched by any cargo profile setting.
+#
+# `panic = "abort"` is deliberately NOT set. It saves a further ~0.36 MB, but
+# UniFFI's scaffolding wraps every call in `catch_unwind` to turn a Rust panic
+# into a Kotlin exception; aborting would turn a panic on one odd photo into a
+# process kill. Not a trade worth 0.36 MB in an app that parses arbitrary
+# user photos.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
 [dependencies]
 # In step with the iOS root Cargo.toml. v0.7.0 is a BREAKING FFI change — the
 # rule corpus became addressable:
@@ -94,3 +118,4 @@ bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag =
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }
+
