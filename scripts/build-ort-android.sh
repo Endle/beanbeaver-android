@@ -15,8 +15,18 @@
 #   ORT_ANDROID_LIB_LOCATION="$(./scripts/build-ort-android.sh --print-lib-location)" \
 #     ./build-android.sh
 #
-# Prerequisites: git, cmake >= 3.28, ninja, python3, and the pinned Android NDK
-# (the same one build-android.sh uses -- see bb.ndkVersion in gradle.properties).
+# Prerequisites: git, cmake >= 3.28, ninja, python3 with the `flatbuffers`
+# module, and the pinned Android NDK (the same one build-android.sh uses -- see
+# bb.ndkVersion in gradle.properties).
+#
+# `flatbuffers` is required by the reduced-operator build (the default): ORT's
+# reduce_op_kernels.py imports util.parse_config, which only exists when
+# flatbuffers is importable, and build.py otherwise dies with a bare
+# ImportError before compiling anything.
+#
+#   python3 -m pip install flatbuffers
+#
+# BB_ORT_REDUCED_OPS=0 builds the full operator set and needs none of it.
 set -euo pipefail
 
 ANDROID_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,6 +51,9 @@ ANDROID_API="${ANDROID_API:-34}"
 ORT_BUILD_DIR="${ORT_BUILD_DIR:-$ANDROID_ROOT/target/ort}"
 ORT_SRC="$ORT_BUILD_DIR/src"
 ORT_OUT="$ORT_BUILD_DIR/build-$ANDROID_ABI"
+# The committed operator list the reduced build is cut to. See its header, and
+# the "operator reduction" note further down.
+OPS_CONFIG="${OPS_CONFIG:-$ANDROID_ROOT/scripts/ort-required-ops.config}"
 
 # --- which ONNX Runtime version -------------------------------------------
 #
@@ -175,6 +188,39 @@ fi
 # --android_cpp_shared matches ort-sys, which emits `-l c++_shared` for Android
 # targets (see static_link_prerequisites). Letting ORT default to the static
 # libc++ here would put two C++ runtimes in one process.
+#
+# --- operator reduction ----------------------------------------------------
+#
+# A stock ORT registers every operator in every domain it supports, plus a kernel
+# instantiation per input type. We run exactly three fixed graphs, and they use
+# 27 operators from one domain. `--include_ops_by_config` compiles out the
+# registrations nothing in that list needs, and `--disable_ml_ops` drops the
+# ai.onnx.ml domain (tree ensembles, SVMs, label encoders) that PP-OCRv5 never
+# touches.
+#
+# The op list is COMMITTED, at $OPS_CONFIG, rather than generated here: deriving
+# it needs python3 + the `onnx` module, which is a build dependency this repo
+# does not otherwise have and F-Droid would have to satisfy too. Regenerate it
+# whenever the models change -- see the header of that file for the command.
+#
+# The failure mode if it goes stale is a *runtime* one: session creation fails
+# with "Could not find an implementation for <Op>", on a device, in the OCR
+# call. A host build cannot catch it -- the host links pyke's stock prebuilt,
+# which has every operator. The guard is therefore
+# scripts/assert-ort-ops-config-fresh.sh, which compares the model hashes
+# recorded in the config against models/ and needs no python at all.
+#
+# BB_ORT_REDUCED_OPS=0 builds the full operator set, for bisecting a suspected
+# missing-operator failure against an otherwise identical engine.
+ops_flags=()
+if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ]; then
+  [ -f "$OPS_CONFIG" ] || { echo "error: missing $OPS_CONFIG" >&2; exit 1; }
+  ops_flags+=(--include_ops_by_config "$OPS_CONFIG" --disable_ml_ops)
+  echo ">> reduced operator build (ops: $OPS_CONFIG)"
+else
+  echo ">> full operator build (BB_ORT_REDUCED_OPS=0)"
+fi
+
 echo ">> building (several minutes; ~3.5 min on a 10-core M-series, longer on CI)"
 python3 "$ORT_SRC/tools/ci_build/build.py" \
   --build_dir "$ORT_OUT" \
@@ -190,6 +236,7 @@ python3 "$ORT_SRC/tools/ci_build/build.py" \
   --skip_tests \
   --skip_submodule_sync \
   --compile_no_warning_as_error \
+  "${ops_flags[@]}" \
   --cmake_extra_defines onnxruntime_BUILD_UNIT_TESTS=OFF
 
 if [ ! -f "$LIB_LOCATION/libonnxruntime_common.a" ]; then
