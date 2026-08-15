@@ -100,6 +100,22 @@ jobs:
           key: cargo-ort-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-ort-${{ runner.os }}-
 
+      # The cache entry above still carries an aarch64 prebuilt downloaded before
+      # ORT was built from source everywhere (#28), and its key is Cargo.lock —
+      # untouched since #23 — so it restores on every run. The "was ORT
+      # downloaded?" assertion below reads that directory, which made it fail on
+      # a cached artefact rather than on anything this build did, and wedged
+      # master: an exact-key hit is never re-saved, and an entry read every run
+      # never ages out.
+      #
+      # Clearing it here restores the assertion's meaning — the aarch64 build
+      # links ORT_ANDROID_LIB_LOCATION and must never repopulate this, so if it
+      # comes back, ort-sys really did fall back to the CDN. Only the aarch64
+      # target: build-android.sh's *host* uniffi-bindgen build still fetches a
+      # host prebuilt, which is not shipped and is worth keeping cached.
+      - name: Drop any cached aarch64 ORT prebuilt
+        run: rm -rf ~/.cache/ort.pyke.io/dfbin/aarch64-linux-android
+
       # ORT wants cmake >= 3.28 (the image is well past it) and ninja, which it
       # does not ship.
       - name: Install ninja
@@ -201,6 +217,9 @@ jobs:
 
           # ort-sys caches every CDN download under a per-target directory, so
           # this is a direct statement that the aarch64 library was not fetched.
+          # It only says that because "Drop any cached aarch64 ORT prebuilt"
+          # emptied it after the cache restore — this directory is cached, so
+          # without that step the check reads a stale artefact, not this build.
           #
           # Only the Android target is asserted, and that is not an oversight:
           # build-android.sh also runs a *host* cargo build to generate the Kotlin
