@@ -241,12 +241,25 @@ resolve_ort_lib() {
     dir="$(ANDROID_NDK_HOME="$NDK" ANDROID_ABI="$abi" \
       "$ANDROID_ROOT/scripts/build-ort-android.sh" --print-lib-location)"
   fi
-  if [ -n "$dir" ] && [ ! -f "$dir/libonnxruntime_common.a" ]; then
+  echo "$dir"
+}
+
+# Validating the directory is the caller's job, not resolve_ort_lib's, and that
+# split is deliberate. resolve_ort_lib is read through $(…), so an `exit 1`
+# inside it kills only the subshell; the script aborts today purely because the
+# call site happens to be a bare assignment, which lets `set -e` see the
+# substitution's status. Fold that into one line as
+# `local ort_lib="$(resolve_ort_lib "$abi")"` and `local`'s own exit status
+# masks it — the error prints and the build carries on with a bad directory.
+# Checking out here needs no such reasoning to stay correct.
+assert_ort_lib_dir() {
+  local dir="$1"
+  [ -n "$dir" ] || return 0   # empty = pyke's CDN prebuilt; nothing to check
+  if [ ! -f "$dir/libonnxruntime_common.a" ]; then
     echo "error: no libonnxruntime_common.a in $dir" >&2
     echo "  This must be the CMake binary dir (…/build-<abi>/Release), not its parent." >&2
     exit 1
   fi
-  echo "$dir"
 }
 
 # ORT is linked statically in both the source and the prebuilt path, so nothing
@@ -255,8 +268,20 @@ resolve_ort_lib() {
 # UnsatisfiedLinkError on the first scan.
 #
 # The NDK's llvm-readelf, not the system one — macOS has no readelf at all, so
-# the check this replaces silently evaluated to "looks static" on every dev
-# machine and could never have failed.
+# the check this replaces evaluated to "looks static" on every dev machine and
+# could not have failed there. (On Linux CI, where readelf does exist, it was a
+# real check and consistently found no DT_NEEDED — which is the evidence that
+# the libonnxruntime.so copying it guarded was dead rather than merely untested.)
+#
+# This is deliberately stricter than what it replaces, including under
+# BB_ORT=prebuilt: the old code responded to a dynamic ORT by hunting for a
+# libonnxruntime.so to copy alongside, and this aborts instead. That narrows the
+# emergency hatch — should pyke ever ship a dynamically linked Android build,
+# BB_ORT=prebuilt stops working rather than degrading. Accepted knowingly: the
+# copying looked in ~/Library/Caches/ort.pyke.io and a cache layout ort no longer
+# uses, so it was not a working fallback to begin with, and shipping a library
+# that dies with UnsatisfiedLinkError on the first scan is worse than not
+# building. Restoring a real fallback means writing one, not keeping this.
 assert_ort_static() {
   local so="$1" readelf="$LLVM/bin/llvm-readelf" dynamic
   # No `2>/dev/null`, and the tool's absence is an error rather than a pass.
@@ -283,7 +308,7 @@ assert_ort_static() {
 # Step 6 — cross-compile the library and install it into jniLibs/.
 # --------------------------------------------------------------------------
 step_build_native_libs() {
-  local abi target ort_lib so_src abi_dir ndk_abi cxx_shared
+  local abi target ort_lib so_src abi_dir ndk_abi cxx_shared cand
   local cargo_flags=(--lib -p "$CRATE")
   [ "$PROFILE" = "release" ] && cargo_flags+=(--release)
 
@@ -299,7 +324,9 @@ step_build_native_libs() {
     target="$(abi_to_target "$abi")"
     echo ">> building $CRATE for $target ($PROFILE) [abi=$abi]"
 
+    # Two statements, not one — see the comment on assert_ort_lib_dir.
     ort_lib="$(resolve_ort_lib "$abi")"
+    assert_ort_lib_dir "$ort_lib"
     # `env VAR=… cargo` rather than an exported VAR: see the header on why
     # ORT_LIB_LOCATION must not survive into the host bindgen build.
     local ort_env=()
@@ -363,7 +390,7 @@ step_build_native_libs() {
 # the NDK off PATH (see step 2).
 # --------------------------------------------------------------------------
 step_generate_kotlin_bindings() {
-  local host_lib="" gen="$WORK/gen"
+  local host_lib="" gen="$WORK/gen" cand
   echo ">> generating Kotlin bindings (host)"
   PATH="$HOST_PATH" cargo build --lib -p "$CRATE" >/dev/null
   for cand in \
@@ -415,7 +442,6 @@ EOF
 }
 
 step_print_summary() {
-  rm -rf "$WORK"
   cat <<EOF
 
 ✅ Android native + UniFFI Kotlin installed into bbreceiptkit/
@@ -437,6 +463,7 @@ main() {
   step_build_native_libs
   step_generate_kotlin_bindings
   step_write_build_info
+  rm -rf "$WORK"          # scratch dir from step 3; nothing below reads it
   step_print_summary
 }
 
