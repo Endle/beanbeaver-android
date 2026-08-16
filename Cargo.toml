@@ -105,8 +105,32 @@ codegen-units = 1
 # bytes to Rust, which sniffs the format, so dropping it would break importing
 # one. The only behavioural change in the v0.9.2..v0.9.3 range is unrelated --
 # core #70 files SALT as a seasoning rather than a staple.
+#
+# v0.9.4 is four item-classification rule fixes found on a device scan (core
+# #73), no FFI change: Shodoshima (a vermicelli brand) classifies at all instead
+# of coming back uncategorized, a Bay Scallop moves off Seafood:Shrimp onto
+# plain Seafood, a "Sugar Baby" watermelon moves off Staple (it was matching
+# "SUGAR") onto Fruit, and a bare "Vegetables" department line moves off
+# Seasoning onto Vegetable. Visible only as different accounts on those lines.
+#
+# v0.10.0 changes the MODELS, which is why it is a minor bump and why this
+# commit also moves ModelStore.kt, models/README.md and the recorded hashes in
+# scripts/ort-required-ops.config. The textline-orientation classifier is now
+# PP-LCNet_x0_25 (1.01 MB) instead of PP-LCNet_x1_0 (6.77 MB) -- upstream's own
+# smaller variant. Core looks these files up by exact name (`scan::model_files`),
+# so the asset must be renamed in the SAME commit as this pin or session load
+# dies on a missing file; `shared/` moves to v0.1.7 for the same reason, because
+# its fetch-models.sh now pulls ocr-models-v2. Measured equivalent before
+# shipping: device_sim over the 123-receipt private corpus gave identical
+# merchant/date/total/crit-item totals with ZERO per-receipt divergence, while
+# classify fell 205 ms -> 77 ms. The converted graph keeps the same 15 op types
+# in the same counts, so the ORT operator list is unaffected. The trade:
+# upstream rates x0_25 at 98.85% top-1 vs 99.42% and it is weaker on
+# 180deg-rotated text -- every corpus receipt is upright, so it costs nothing
+# there. Accepted deliberately. No FFI surface change: the diff under
+# crates/ffi/ is private constants moving out plus a doc comment.
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9.3" }
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.10.0" }
 # The library the app actually loads. It re-exports nothing and is called only
 # through the generated Kotlin; the dependency exists so `cargo build -p
 # bb-mobile-ffi` produces libbb_mobile_ffi.so, which carries BOTH uniffi
@@ -118,8 +142,8 @@ bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9
 # direct bb-receipt-ffi dep is only here for shared/src/bin/batch_e2e.rs, which
 # uses the core's Rust API. Cargo.lock is committed — a duplicate
 # bb-receipt-ffi entry there is the tell.
-# NOT yet carrying features = ["xnnpack"], though core v0.9.3 and
-# bb-mobile-ffi v0.1.5 both offer it and scripts/build-ort-android.sh builds ORT
+# NOT yet carrying features = ["xnnpack"], though core v0.9.3+ and
+# bb-mobile-ffi v0.1.5+ both offer it and scripts/build-ort-android.sh builds ORT
 # with --use_xnnpack. Enabling it fails at link with hundreds of undefined
 # hidden `xnn_*` microkernel symbols: ort-sys does not add XNNPACK's kernel
 # archives to the link line, the same shape as the re2 trap in
@@ -131,7 +155,7 @@ bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.9
 # which has been wrong since beanbeaver-ios 3c580a6 (2026-07-01, "drop CoreML --
 # CPU wins on speed and accuracy"). Corrected in the umbrella CLAUDE.md (
 # bb-workspace #1); fixed here because the same sentence had been copied in.
-bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.5" }
+bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.7" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }

@@ -12,7 +12,7 @@ object ModelStore {
     val modelFiles = listOf(
         "PP-OCRv5_mobile_det.onnx",
         "PP-OCRv5_mobile_rec.onnx",
-        "PP-LCNet_x1_0_textline_ori.onnx",
+        "PP-LCNet_x0_25_textline_ori.onnx",
     )
 
     fun modelsDir(context: Context): File =

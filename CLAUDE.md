@@ -407,8 +407,8 @@ and no fastlane metadata.
 
 | Dep | Why | Pinned at |
 |---|---|---|
-| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.4 |
-| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.9.2 |
+| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.7 |
+| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.10.0 |
 
 The `shared/` submodule pointer is a **third** thing to move and is not covered by
 either pin: `shared/src/bin/` is compiled into this package, so a mobile-util tag
@@ -426,8 +426,8 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.9.2**, reached *through* mobile-util
-  v0.1.4 — see the table above before bumping either. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.10.0**, reached *through* mobile-util
+  v0.1.7 — see the table above before bumping either. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -446,6 +446,23 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
   kinds are open by contract — `WarningSeverity.kt`'s `else ->` ranks it and
   `WarningSeverityTest` fails if it goes unranked. Adding is safe; renaming or
   removing a variant would not be.
+- **A core bump can move the MODEL SET, and that is not visible in
+  `crates/ffi/`.** v0.10.0 renamed the textline-orientation weights
+  (`PP-LCNet_x1_0` → `PP-LCNet_x0_25`, `ocr-models-v1` → `-v2`), and core resolves
+  them **by exact name** (`scan::model_files`), so the rename has to land in the
+  *same commit* as the pin or `OcrSession` dies at session load on a missing
+  file. Four things move together here, and an empty `crates/ffi/` diff will not
+  warn you about any of them: `app/…/receipt/ModelStore.kt`, `models/README.md`,
+  the recorded hashes in `scripts/ort-required-ops.config`, and the **`shared/`
+  submodule** (its `fetch-models.sh` is what chooses the release). Check with
+  `git -C ../beanbeaver-core diff <from> <to> -- docs/ocr-models.md crates/*/src/model_files.rs`.
+  Two local traps, both silent: Gradle's `syncOcrModels` copies `*.onnx` by
+  glob, so a superseded weight left in `models/` is repackaged into the APK and
+  quietly cancels the size win — delete it from `models/` **and**
+  `app/src/main/assets/models/`; and `assert-ort-ops-config-fresh.sh` compares
+  model hashes, so it fires on the new file unless the config's recorded block
+  is updated (only the hashes — regenerate the operator list only if the op set
+  actually changed, which for x0_25 it did not).
 - **A warning is a record, not a string** (core v0.8.0). `ReceiptResult.warnings`
   is `[ReceiptWarning]` (`kind` + `message` + `afterItemIndex`) and
   `warning_after_item_indices` is gone. `WarningSeverity.kt` is the single place
