@@ -3,6 +3,12 @@
 BeanBeaver turns a photo of a receipt into an itemized Beancount transaction — entirely on
 your phone.
 
+<a href="https://store.colourswift.com/app/com.zhenbo.beanbeaver"><img
+  src="hhttps://store.colourswift.com/badge.svg"
+  alt="Download BeanBeaver on the App Store" height="52"></a>
+
+
+
 ## Parsing Grocery Receipts
 Snap a receipt with the camera (or pick one from your photo library). BeanBeaver reads it with on-device text recognition, then extracts the merchant, date, line items, and total cost. It provides detail of actual categories (Dairy $30, Meat $50, Drink $40, Fruit $30), instead of one lump sum record (Costco $100, T&T $50).
 
