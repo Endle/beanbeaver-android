@@ -19,10 +19,11 @@
 # module, and the pinned Android NDK (the same one build-android.sh uses -- see
 # bb.ndkVersion in gradle.properties).
 #
-# `flatbuffers` is only needed for the EXPERIMENTAL reduced-operator build
-# (BB_ORT_REDUCED_OPS=1), which is OFF by default because it does not work yet
-# -- see scripts/ort-required-ops.config. The default full-operator build needs
-# none of it.
+# `flatbuffers` is required: the reduced-operator build (BB_ORT_REDUCED_OPS=1,
+# now the DEFAULT) needs it for ORT's util.parse_config. Without it build.py
+# dies with a bare import error. There is a preflight check below so that
+# failure arrives in a second rather than partway through a long build.
+# BB_ORT_REDUCED_OPS=0 builds the full operator set and needs none of it.
 #
 #   python3 -m pip install flatbuffers
 set -euo pipefail
@@ -164,10 +165,15 @@ RE2_LIB="$LIB_LOCATION/_deps/re2-build/libre2.a"
 ORT_STAMP="$LIB_LOCATION/.bb-ort-recipe"
 ort_recipe_id() {
   local ops_hash="none"
-  if [ "${BB_ORT_REDUCED_OPS:-0}" = "1" ] && [ -f "$OPS_CONFIG" ]; then
-    ops_hash="$(shasum -a 256 "$OPS_CONFIG" | awk '{print $1}')"
+  if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] && [ -f "$OPS_CONFIG" ]; then
+    # Only the operator rows, not the whole file. Most of that config is
+    # long-form documentation, and hashing it meant a prose edit invalidated the
+    # tree and cost a full rebuild -- which is friction pushing toward not
+    # writing the documentation down. Comments cannot change what ORT compiles.
+    ops_hash="$(grep -v '^[[:space:]]*#' "$OPS_CONFIG" | grep -v '^[[:space:]]*$' \
+                | shasum -a 256 | awk '{print $1}')"
   fi
-  echo "ort=$ORT_VERSION abi=$ANDROID_ABI api=$ANDROID_API reduced=${BB_ORT_REDUCED_OPS:-0} ops=$ops_hash"
+  echo "ort=$ORT_VERSION abi=$ANDROID_ABI api=$ANDROID_API reduced=${BB_ORT_REDUCED_OPS:-1} ops=$ops_hash"
 }
 WANT_RECIPE="$(ort_recipe_id)"
 
@@ -186,6 +192,25 @@ WANT_RECIPE="$(ort_recipe_id)"
 # So a recipe change costs a full ~4 minute rebuild. That is the honest price of
 # changing what the engine contains, and it is far cheaper than the alternative,
 # which is a green build that dies on the first scan.
+# Preflight the reduced build's one host dependency BEFORE the recipe check
+# below, which WIPES a tree built to a different recipe. Discovering a missing
+# module after that has already cost a usable ONNX Runtime and a full rebuild.
+# ORT's util.parse_config only exists when flatbuffers is importable, and
+# build.py does not reach it until well into the build.
+if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ] && [ "$PRINT_ONLY" != 1 ]; then
+  python3 -c 'import flatbuffers' 2>/dev/null || {
+    cat >&2 <<EOF
+error: the reduced-operator build needs the python 'flatbuffers' module, and
+       $(command -v python3 || echo python3) does not have it.
+
+  python3 -m pip install --upgrade flatbuffers
+
+       Or build the full operator set instead:  BB_ORT_REDUCED_OPS=0 $0
+EOF
+    exit 1
+  }
+fi
+
 if [ -f "$LIB_LOCATION/libonnxruntime_common.a" ] || [ -d "$ORT_OUT" ]; then
   if [ -f "$ORT_STAMP" ] && [ "$(cat "$ORT_STAMP")" = "$WANT_RECIPE" ]; then
     # Matching tree. In --print-lib-location mode there is nothing to do; this is
@@ -246,11 +271,17 @@ fi
 # ai.onnx.ml domain (tree ensembles, SVMs, label encoders) that PP-OCRv5 never
 # touches.
 #
-# OFF BY DEFAULT, because it does not work yet. Enabling it produces a library
-# that links, passes CI and then fails on the first scan with "Could not find an
-# implementation for <Op>". The operator list cannot currently be derived
-# reliably -- see the long note in scripts/ort-required-ops.config. Set
-# BB_ORT_REDUCED_OPS=1 only to continue that investigation.
+# ON BY DEFAULT since 2026-08-23, worth ~7.2 MB of the shipped .so. It was off
+# before that because #32 shipped an engine that could not open a session: the
+# operator list was derived from a single tool, and no single tool describes the
+# graph the runtime actually builds. The list is now the UNION of three, which is
+# closed under whether a fusion fires -- see scripts/ort-required-ops.config, and
+# regenerate it with scripts/gen-ort-ops-config.py, never by hand.
+#
+# Verified on an arm64 AVD before this default changed: 1/1 cases fully pass.
+# CI cannot verify it (no hosted runner can run an arm64 AVD), so the standing
+# rule holds -- a model change or an ORT bump is not verified until a phone
+# runtime has scanned a receipt.
 #
 # The failure mode if it goes stale is a *runtime* one: session creation fails
 # with "Could not find an implementation for <Op>", on a device, in the OCR
@@ -262,15 +293,10 @@ fi
 # BB_ORT_REDUCED_OPS=0 builds the full operator set, for bisecting a suspected
 # missing-operator failure against an otherwise identical engine.
 ops_flags=()
-if [ "${BB_ORT_REDUCED_OPS:-0}" = "1" ]; then
+if [ "${BB_ORT_REDUCED_OPS:-1}" = "1" ]; then
   [ -f "$OPS_CONFIG" ] || { echo "error: missing $OPS_CONFIG" >&2; exit 1; }
   ops_flags+=(--include_ops_by_config "$OPS_CONFIG" --disable_ml_ops)
-  cat >&2 <<'WARN'
->> reduced operator build -- EXPERIMENTAL, KNOWN BROKEN
-   The committed operator list is incomplete and the app fails on the first
-   scan with "Could not find an implementation for <Op>". Do not ship this.
-   See scripts/ort-required-ops.config for why it is hard to get right.
-WARN
+  echo ">> reduced operator build (--include_ops_by_config --disable_ml_ops)" >&2
 else
   echo ">> full operator build"
 fi
