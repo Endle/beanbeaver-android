@@ -3,8 +3,7 @@
 BeanBeaver turns a photo of a receipt into an itemized Beancount transaction — entirely on
 your phone.
 
-<a href="https://store.colourswift.com/app/com.zhenbo.beanbeaver"><img
-  src="hhttps://store.colourswift.com/badge.svg"
+<a href="https://store.colourswift.com/app/com.zhenbo.beanbeaver"><img src="https://store.colourswift.com/badge.svg"
   alt="Download BeanBeaver on the App Store" height="52"></a>
 
 
