@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
@@ -70,7 +71,8 @@ import com.zhenbo.beanbeaver.receipt.needsAttention
 import com.zhenbo.beanbeaver.receipt.unexported
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import com.zhenbo.beanbeaver.ui.theme.cardBackground
-import com.zhenbo.beanbeaver.ui.theme.groupedBackground
+import com.zhenbo.beanbeaver.ui.theme.bbCanvas
+import com.zhenbo.beanbeaver.ui.theme.bbInk
 
 /**
  * Every scanned receipt — the "see everything I scanned" and "bulk backup" halves
@@ -96,6 +98,9 @@ fun ReceiptsScreen(
     BackHandler(onBack = onBack)
 
     val allRecords by SpendStore.records.collectAsStateWithLifecycle()
+    // The same single state the home slip's eye and the Settings toggle write,
+    // so the row subtitles mask with everything else.
+    val hidden by AmountPrivacy.hideAmounts.collectAsStateWithLifecycle()
 
     /**
      * Everything in scope, before the chips narrow it — what the chip counts are
@@ -106,12 +111,72 @@ fun ReceiptsScreen(
         else allRecords.filter { SpendSummary.monthId(it) == monthFilter }
     }
 
+    /**
+     * Months present in the list, newest first, each with its receipt count.
+     * Empty when the caller already narrowed to one month — a month chip row
+     * would be one chip that changes nothing.
+     */
+    val monthChips = remember(scopedRecords, monthFilter) {
+        if (monthFilter != null) emptyList() else {
+            val thisYear = SpendSummary.currentMonthId().take(4)
+            SpendSummary.monthIds(scopedRecords).map { id ->
+                // "March", not "March 2026" — a chip is a word wide, and the year
+                // only earns its space once the list reaches back past this one.
+                val full = SpendSummary.monthLabel(id)
+                MonthChip(
+                    id = id,
+                    label = if (id.startsWith(thisYear)) full.substringBefore(' ') else full,
+                    count = scopedRecords.count { SpendSummary.monthId(it) == id },
+                )
+            }
+        }
+    }
+
+    /**
+     * Merchants worth a chip: the recurring ones, busiest first. A merchant seen
+     * once is a row in the list, not a way to narrow it.
+     */
+    val merchantChips = remember(scopedRecords) {
+        scopedRecords.groupBy { it.result.merchant }
+            .map { MerchantChip(it.key, it.value.size) }
+            .filter { it.count > 1 }
+            .sortedWith(compareByDescending<MerchantChip> { it.count }.thenBy { it.name })
+            .take(4)
+    }
+
     // Not persisted: the filter is a question you ask on the way to doing
     // something ("what haven't I filed?"), not a preference — and one that
     // survived a relaunch would hide receipts from someone who'd forgotten they
     // set it. `rememberSaveable` still carries it across a rotation.
-    var filter by rememberSaveable { mutableStateOf(ReceiptFilter.ALL) }
-    val records = scopedRecords.filter(filter::matches)
+    //
+    // Null means "whatever the default says" — the newest month, which is what
+    // the list should open on and which isn't knowable at init. Opening on
+    // everything-ever is the wrong first answer once there is more than a month
+    // of it, and every receipt stays one chip away.
+    var filter by rememberSaveable { mutableStateOf<ReceiptFilter?>(null) }
+    val activeFilter = filter
+        ?: monthChips.firstOrNull()?.let { ReceiptFilter.Month(it.id) }
+        ?: ReceiptFilter.All
+    val records = scopedRecords.filter(activeFilter::matches)
+
+    /**
+     * The leading category across the receipts on screen, and what each receipt
+     * spent in it.
+     *
+     * `roots.first` follows the same order the Spending screen draws, so this row
+     * and that screen agree on what leads. One FFI call for the whole list rather
+     * than a rollup per row.
+     */
+    val categoryShare = remember(scopedRecords) {
+        val month = SpendSummary.month(SpendSummary.defaultMonthId(scopedRecords), scopedRecords)
+        month.roots.firstOrNull()?.let { root ->
+            val ids = scopedRecords.map { it.id }.toSet()
+            root.label.lowercase() to SpendSummary
+                .receipts(SpendSummary.Category.Root(root.id), scopedRecords)
+                .filter { it.record.id in ids }
+                .associate { it.record.id to it.amount }
+        }
+    }
 
     /**
      * The backlog the footer bar acts on — scoped to the month being shown, but
@@ -131,7 +196,7 @@ fun ReceiptsScreen(
     val selected = records.filter { it.id in selection }
 
     Scaffold(
-        containerColor = groupedBackground,
+        containerColor = bbCanvas,
         topBar = {
             TopAppBar(
                 title = { Text(monthFilter?.let(SpendSummary::monthLabel) ?: "Receipts") },
@@ -189,20 +254,21 @@ fun ReceiptsScreen(
             // silently changes what "Export 4 Receipts" is about to send.
             if (!editing) {
                 FilterChips(
-                    filter = filter,
+                    filter = activeFilter,
                     onSelect = { filter = it },
                     total = scopedRecords.size,
                     backlogCount = backlog.size,
+                    monthChips = monthChips,
+                    merchantChips = merchantChips,
                 )
             }
 
             if (records.isEmpty()) {
+                // Only `Not exported` can empty the list now — a month or a
+                // merchant chip only exists because it has receipts in it.
                 EmptyState(
-                    title = if (filter == ReceiptFilter.EXPORTED) "Nothing Exported Yet"
-                    else "Nothing to Export",
-                    message = if (filter == ReceiptFilter.EXPORTED)
-                        "Receipts you've filed to your ledger show up here."
-                    else "Every receipt here has reached your ledger.",
+                    title = "Nothing to Export",
+                    message = "Every receipt here has reached your ledger.",
                     modifier = Modifier.fillMaxSize().weight(1f),
                 )
             } else {
@@ -214,7 +280,7 @@ fun ReceiptsScreen(
                     items(records, key = { it.id }) { record ->
                         ReceiptRow(
                             record = record,
-                            detail = detail(context, record),
+                            detail = detail(context, record, categoryShare, hidden),
                             editing = editing,
                             checked = record.id in selection,
                             onToggle = {
@@ -298,25 +364,40 @@ fun ReceiptsScreen(
 }
 
 /**
- * Which slice of the month the list is showing — the same `isExported` split the
- * dots draw, as a way to narrow the list.
+ * Which slice the list is showing.
+ *
+ * **Time and place lead now, and ledger state is one chip of several.** The row
+ * used to be `All / Not exported / Exported`, which organised browsing entirely
+ * around export — a chore, not a reason to open the list. `Exported` is gone: it
+ * answered the inverse of a question nobody asks, and every receipt it held is
+ * reachable through its month.
  */
-enum class ReceiptFilter(val label: String) {
-    ALL("All"),
-    NOT_EXPORTED("Not exported"),
-    EXPORTED("Exported"),
-    ;
+sealed interface ReceiptFilter {
+    data object All : ReceiptFilter
+    data class Month(val id: String) : ReceiptFilter
+    data object NotExported : ReceiptFilter
+    data class Merchant(val name: String) : ReceiptFilter
 
     fun matches(record: SpendRecord): Boolean = when (this) {
-        ALL -> true
-        NOT_EXPORTED -> !record.isExported
-        EXPORTED -> record.isExported
+        All -> true
+        is Month -> SpendSummary.monthId(record) == id
+        NotExported -> !record.isExported
+        is Merchant -> record.result.merchant == name
     }
 }
 
 /**
- * So "what haven't I filed?" is answerable without reading every dot, and the
- * counts state the backlog even when the answer is "none".
+ * Time and place first, with the one retained export filter second.
+ *
+ * `Not exported` sits in position three deliberately: it is the chip with an
+ * action behind it, and last in a scrolling row is where a chip gets clipped and
+ * goes unseen. It is worded exactly as the row dots and Spending's meta line word
+ * it — one state, one phrase, wherever it is named.
+ *
+ * **`All` leads, and is shown even when nothing is scoped** — it is the way back
+ * out of every other chip. The unscoped list opens on the newest month, so
+ * without it there is no chip that means "stop narrowing", and the older receipts
+ * a month chip hides are unreachable rather than one tap away.
  */
 @Composable
 private fun FilterChips(
@@ -324,30 +405,50 @@ private fun FilterChips(
     onSelect: (ReceiptFilter) -> Unit,
     total: Int,
     backlogCount: Int,
+    monthChips: List<MonthChip>,
+    merchantChips: List<MerchantChip>,
 ) {
-    // Flat card colour, no tonal elevation: Material tints an elevated surface
-    // with the *primary*, which here is the brand red — a pink banner across
-    // the top of a screen whose whole point is that red means "tap me".
-    Surface(color = cardBackground) {
+    Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(bbCanvas)
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilterChip(ReceiptFilter.ALL, filter, total, null, onSelect)
+            FilterChip(ReceiptFilter.All, filter, total, null, "All", onSelect)
+            monthChips.firstOrNull()?.let {
+                FilterChip(ReceiptFilter.Month(it.id), filter, it.count, null, it.label, onSelect)
+            }
             FilterChip(
-                ReceiptFilter.NOT_EXPORTED, filter, backlogCount,
-                SpendRecord.ExportStatus.NOT_EXPORTED, onSelect,
+                ReceiptFilter.NotExported, filter, backlogCount,
+                SpendRecord.ExportStatus.NOT_EXPORTED, "Not exported", onSelect,
             )
-            FilterChip(
-                ReceiptFilter.EXPORTED, filter, total - backlogCount,
-                SpendRecord.ExportStatus.EXPORTED, onSelect,
-            )
+            monthChips.drop(1).forEach {
+                FilterChip(ReceiptFilter.Month(it.id), filter, it.count, null, it.label, onSelect)
+            }
+            merchantChips.forEach {
+                // Title-cased to match the rows — the chip and the receipts it
+                // selects have to be the same word, and the parse carries the
+                // merchant as printed (`COSTCO`).
+                FilterChip(
+                    ReceiptFilter.Merchant(it.name), filter, it.count, null,
+                    titleCase(it.name), onSelect,
+                )
+            }
         }
+        // The canvas rather than a raised surface: the row is part of the page,
+        // not a toolbar over it. The hairline is what separates it from the list.
+        BbHairline(startInset = 0.dp)
     }
 }
+
+/** A month present in the list, with how many receipts it holds. */
+data class MonthChip(val id: String, val label: String, val count: Int)
+
+/** A merchant worth a chip: seen more than once. */
+data class MerchantChip(val name: String, val count: Int)
 
 @Composable
 private fun FilterChip(
@@ -355,6 +456,7 @@ private fun FilterChip(
     current: ReceiptFilter,
     count: Int,
     status: SpendRecord.ExportStatus?,
+    label: String,
     onSelect: (ReceiptFilter) -> Unit,
 ) {
     val selected = value == current
@@ -363,10 +465,7 @@ private fun FilterChip(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(percent = 50))
-            .background(
-                if (selected) BbAccent
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-            )
+            .background(if (selected) BbAccent else bbInk.copy(alpha = 0.07f))
             .selectable(selected = selected, onClick = { onSelect(value) })
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
@@ -377,16 +476,16 @@ private fun FilterChip(
             ExportStatusDot(status, size = 8.dp)
         }
         Text(
-            "${value.label} $count",
+            "$label $count",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
-            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+            color = if (selected) Color.White else bbInk,
         )
     }
 }
 
 /**
- * One tap to file everything unfiled. The bar is present whenever there's a
+ * One tap to export the whole backlog. The bar is present whenever there's a
  * backlog and absent the moment there isn't, so it doubles as the answer to "am
  * I up to date?" — a screen with no bar is a screen with nothing owing. It used
  * to take four taps through a menu most people never opened (Select → ⋮ →
@@ -440,13 +539,26 @@ private fun EmptyState(title: String, message: String, modifier: Modifier = Modi
  * Lowercased: these join the date/item-count subtitle now rather than heading
  * their own line.
  */
-private fun detail(context: android.content.Context, record: SpendRecord): String? = buildList {
+private fun detail(
+    context: android.content.Context,
+    record: SpendRecord,
+    categoryShare: Pair<String, Map<String, Double>>?,
+    hidden: Boolean,
+): String? = buildList {
+    // The share is simply omitted for a receipt with none of the leading
+    // category, rather than printing a zero.
+    categoryShare?.let { (label, byRecord) ->
+        val amount = byRecord[record.id]
+        if (amount != null && amount > 0) {
+            add("${maskedAmount(formatCurrency(amount), hidden)} $label")
+        }
+    }
     when (SpendStore.photoState(context, record)) {
         SpendRecord.PhotoState.PRESENT -> Unit
         SpendRecord.PhotoState.CLEARED -> add("photo cleared")
         SpendRecord.PhotoState.UNAVAILABLE -> add("photo unavailable")
     }
-    if (record.isExcluded) add("excluded from spend")
+    if (record.isExcluded) add("excluded from totals")
 }.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 
 @Composable
@@ -480,7 +592,7 @@ private fun ReceiptRow(
             }
             // Export state as a glyph, not a caption. It used to be a grey line
             // in the same weight and colour as "Photo cleared", so nothing
-            // distinguished an unfiled receipt at a glance.
+            // distinguished a not-yet-exported receipt at a glance.
             ExportStatusDot(record.exportStatus)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -610,6 +722,7 @@ fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showPhoto by rememberSaveable { mutableStateOf(false) }
+    var showEditor by rememberSaveable { mutableStateOf(false) }
     var confirmClearPhoto by rememberSaveable { mutableStateOf(false) }
     var photoMenuOpen by remember { mutableStateOf(false) }
 
@@ -637,10 +750,21 @@ fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
         }
     }
 
+    if (showEditor) {
+        ReceiptEditorScreen(
+            original = current.result,
+            imageFile = photoFile,
+            exportedAt = current.exportedAt,
+            onSave = { SpendStore.updateResult(context, current.id, it) },
+            onBack = { showEditor = false },
+        )
+        return
+    }
+
     BackHandler(onBack = onBack)
 
     Scaffold(
-        containerColor = groupedBackground,
+        containerColor = bbCanvas,
         topBar = {
             TopAppBar(
                 title = { Text(titleCase(current.result.merchant), maxLines = 1) },
@@ -661,6 +785,13 @@ fun RecordedReceiptScreen(record: SpendRecord, onBack: () -> Unit) {
                             expanded = photoMenuOpen,
                             onDismissRequest = { photoMenuOpen = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Review & Fix") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = null)
+                                },
+                                onClick = { photoMenuOpen = false; showEditor = true },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Save to Camera Roll") },
                                 leadingIcon = {

@@ -6,6 +6,7 @@ import org.junit.Test
 import uniffi.bb_mobile_ffi.SpendItemEntry
 import uniffi.bb_receipt_ffi.FieldConfidences
 import uniffi.bb_receipt_ffi.ItemTag
+import uniffi.bb_receipt_ffi.MerchantDetails
 import uniffi.bb_receipt_ffi.MerchantMatch
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.ReceiptItem
@@ -59,6 +60,7 @@ class SpendSummaryTest {
     ) = ReceiptResult(
         merchant = merchant,
         merchantMatch = MerchantMatch(merchant, merchant, MerchantMatchStatus.UNKNOWN, 0.0),
+        merchantDetails = MerchantDetails(null, null, null, null, null, null, emptyList()),
         date = date,
         dateIsPlaceholder = dateIsPlaceholder,
         total = total,
