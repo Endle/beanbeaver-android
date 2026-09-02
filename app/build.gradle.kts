@@ -128,7 +128,12 @@ android {
         // platform's numbering it is. This jumps 0.5.0 -> 1.1.2 to close the gap
         // in one step; from here the two move together. versionCode stays on its
         // own monotonic Play counter and has no iOS twin.
-        versionName = "1.2.0"
+        //
+        // 1.3.0 is the one release where android names the version FIRST: iOS's
+        // own bump to it is still uncommitted working tree on a branch, so this
+        // number has to land there before either store sees it. See
+        // ~/src/bb/130_release_note_android.md.
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")
