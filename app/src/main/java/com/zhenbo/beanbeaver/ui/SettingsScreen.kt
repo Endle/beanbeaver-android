@@ -278,17 +278,6 @@ fun SettingsPane(
             }
 
             SettingsSection(
-                footer = "Runs the full on-device scan on a receipt bundled with the app — " +
-                    "a way to see what BeanBeaver does without a receipt in hand.",
-            ) {
-                OutlinedButton(onClick = onRunSample, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.DocumentScanner, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Scan a Sample Receipt", fontWeight = FontWeight.SemiBold)
-                }
-            }
-
-            SettingsSection(
                 footer = "Both ship inside the app, so they're readable offline.",
             ) {
                 NavRow(title = "Privacy Policy", subtitle = null, onClick = onOpenPrivacy)
@@ -336,6 +325,16 @@ fun SettingsPane(
                 NavRow(title = "Stored Debug Info", subtitle = null, onClick = onOpenDebug)
                 Spacer(Modifier.size(8.dp))
                 NavRow(title = "Dump All Data", subtitle = null, onClick = onOpenDataDump)
+                Spacer(Modifier.size(8.dp))
+                // Filed here rather than in a section of its own: it runs the
+                // full on-device scan on a receipt bundled with the app, which is
+                // a diagnostic — and, on a fresh build, the cheapest proof that
+                // the JNI seam and ONNX Runtime can open a session at all.
+                OutlinedButton(onClick = onRunSample, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.DocumentScanner, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Scan a Sample Receipt", fontWeight = FontWeight.SemiBold)
+                }
             }
 
             SettingsSection(

@@ -225,6 +225,25 @@ fun BeanBeaverApp(
         return
     }
     (status as? ScanStatus.Done)?.let { done ->
+        if (showEditor) {
+            ReceiptEditorScreen(
+                original = done.result,
+                // The scan's own capture, still in memory — written to the
+                // captures dir under a name the record knows, so the editor is
+                // handed the file rather than the bytes.
+                imageFile = SpendStore.records.value
+                    .firstOrNull { it.result.beanbeaverId == done.result.beanbeaverId }
+                    ?.let { SpendStore.photoFile(context, it) },
+                onSave = { edited ->
+                    // Addressed by the *previous* id: correcting the date changes
+                    // the id the edited copy carries.
+                    SpendStore.updateResult(context, done.result, edited)
+                    pipeline.replaceResult(edited)
+                },
+                onBack = { showEditor = false },
+            )
+            return
+        }
         if (showJsonPreview) {
             ReceiptJsonScreen(
                 result = done.result,

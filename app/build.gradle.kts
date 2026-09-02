@@ -121,14 +121,14 @@ android {
         // 0.4.0 reached Play carrying a PROFILE=debug native library (the
         // 224 MB bundle that verifyReleaseNativeProfile now refuses), so the
         // fixed build has to go up rather than replace it.
-        versionCode = 8
+        versionCode = 9
         // Tracks beanbeaver-ios's MARKETING_VERSION, deliberately: the two apps
         // are the same product at feature parity, so a user comparing them (or a
         // bug report naming "BeanBeaver 1.1.3") should not have to know which
         // platform's numbering it is. This jumps 0.5.0 -> 1.1.2 to close the gap
         // in one step; from here the two move together. versionCode stays on its
         // own monotonic Play counter and has no iOS twin.
-        versionName = "1.1.3"
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Surfaced in the About footer (see BeanBeaverApp HomePane).
         buildConfigField("String", "CORE_VERSION", "\"$coreVersion\"")

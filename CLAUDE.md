@@ -14,11 +14,16 @@ core-tag pinning rules (this repo is newer and not listed there yet — treat it
 
 **Scope:** document camera (ML Kit) or system photo picker or bundled sample →
 scan → merchant / items / Beancount → export (GitHub PR, or a Money Manager
-`.xlsx` via the share sheet), single or batch. Every scan is also **recorded**,
-so the app is a spend tracker over its own history: Spending (per-month category
-breakdown, drilling into the items behind any total) and Receipts (everything
-scanned, kept until deleted, each row carrying an export-status dot and
-filterable by it). Settings can browse and extend the classification ruleset.
+`.xlsx` via the share sheet), single or batch. A misread scan can be corrected
+in **Review & Fix**, which re-renders it through `reformat_receipt` rather than
+patching anything locally. Every scan is also **recorded**, so the app is a
+spend tracker over its own history: Home (the month's total and a six-week bar
+chart), Spending (per-month category breakdown, week-over-week scoped to any
+category, drilling into the items behind any total) and Receipts (everything
+scanned, kept until deleted, filterable by month, merchant, or what hasn't been
+exported). Settings can browse and extend the classification ruleset. **No
+monthly budget** — that was removed 2026-09-02; the product's question is what
+you are spending and whether it is climbing, not whether you are allowed to.
 Not yet: a Storage Access Framework ledger destination — iOS's equivalent
 Files-inbox backend is written but commented out ("disabled for now"), so this
 side deliberately has no twin until that comes back.
@@ -408,8 +413,8 @@ and no fastlane metadata.
 
 | Dep | Why | Pinned at |
 |---|---|---|
-| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.7 |
-| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.10.0 |
+| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.15 |
+| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.13.0 |
 
 The `shared/` submodule pointer is a **third** thing to move and is not covered by
 either pin: `shared/src/bin/` is compiled into this package, so a mobile-util tag
@@ -427,8 +432,8 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.10.0**, reached *through* mobile-util
-  v0.1.7 — see the table above before bumping either. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.13.0**, reached *through* mobile-util
+  v0.1.15 — see the table above before bumping either. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -497,9 +502,14 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
   carry) and **re-attachment** (Rust returns a record id and an item index; the
   screens want the app's own objects). Its public Kotlin surface is unchanged,
   so no screen moved. Don't re-add arithmetic here — a second implementation's
-  opinion is the thing that was just deleted. `BudgetPrefs` keeps the *storage*
-  of the budget target while the *resolution rule* moved too; a target is still
-  an overlay drawn on top of the arithmetic and must never be an input to it.
+  opinion is the thing that was just deleted.
+- **The monthly budget is gone** (2026-09-02, catching up iOS #74). `BudgetPrefs`
+  and the Settings section, target bar and pace line it fed are deleted. Android
+  was the last caller of `spend_declared_roots`, `spend_resolve_budget_root` and
+  `spend_fallback_budget_root` — iOS kept them alive for this side — so those
+  three can be dropped in a later `beanbeaver-mobile-util` release. The stored
+  keys (`budgetRootTag`, `budgetMonthlyAmount`) are still *read* by `DataDump`
+  on purpose: a leftover value is exactly what a dump should surface.
 - **Process-wide stores, not ViewModels**, for `SpendStore`, `ItemRuleStore` and
   `AmountPrivacy`: both scan paths write to them and several screens read them,
   and a stale copy in one owner is exactly the bug to avoid. Each is `ensureLoaded`
@@ -507,10 +517,16 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
   TOML corpus on first read).
 - Sub-screens are **boolean-gated early returns**, not a Nav back stack, so any
   new screen needs its own `BackHandler` — without one, system back leaves the
-  app entirely instead of popping one rung. Every screen carries one now; a
-  shared scaffold (`DocumentScaffold`, `DetailScaffold`) carries a single one on
-  behalf of all its callers. Adding a screen without one is the easiest way to
-  regress this, and it will not show up in a build or a unit test.
+  app entirely instead of popping one rung. Every screen carries one; a shared
+  scaffold (`DocumentScaffold`, `DetailScaffold`) carries a single one on behalf
+  of all its callers. Adding a screen without one is the easiest way to regress
+  this, and it will not show up in a build or a unit test.
+
+  **A tab root is the exception, and needs none.** Home and Settings are selected
+  by `RootTab` rather than gated, and deliberately have no `BackHandler`: system
+  back from a root *should* leave the app. That is why `SettingsScreen` became
+  `SettingsPane` — a pane with no `Scaffold`, no app bar and no back handler,
+  since the shell owns all three.
 - **GitHub filing is idempotent per receipt *folder*, not per file.** `basename`
   carries the export's clock time (`hhmm`), so re-filing a receipt a minute later
   produces a path that has never existed — a per-file existence check can never
@@ -563,8 +579,12 @@ never reuse one (see the burned-code comment in `app/build.gradle.kts`).
 | `ReceiptCaptureStore.swift` | `receipt/ReceiptCaptureStore.kt` |
 | `SpendStore.swift` / `SpendSummary.swift` | `receipt/SpendStore.kt`, `receipt/SpendSummary.kt` |
 | `SpendingView.swift` / `ReceiptsView.swift` / `CategoryItemsView.swift` | `ui/SpendingScreen.kt`, `ui/ReceiptsScreen.kt`, `ui/CategoryItemsScreen.kt` |
+| `HomeView.swift` / `RootTab.swift` | `ui/HomeScreen.kt`, `ui/RootTab.kt` |
+| `ReceiptSlip.swift` (slip, torn edge, eye, display amount) / `TrendChart.swift` | `ui/ReceiptSlip.kt`, `ui/TrendChart.kt` |
+| `ReceiptEditing.swift` / `ReceiptEditorView.swift` | `receipt/ReceiptEditing.kt`, `ui/ReceiptEditorScreen.kt` |
 | `ItemRuleStore.swift` / `ItemRulesView.swift` | `receipt/ItemRuleStore.kt`, `ui/ItemRulesScreen.kt` |
-| `Theme.swift` (`CategoryDisplay`/`PriceFormat`/`ReceiptDateFormat`/`AmountPrivacy`) | `ui/Format.kt`, `ui/AmountPrivacy.kt` (`BudgetPrefs` lives in `receipt/SpendStore.kt`) |
+| `Theme.swift` (`CategoryDisplay`/`PriceFormat`/`ReceiptDateFormat`/`AmountPrivacy`) | `ui/Format.kt`, `ui/AmountPrivacy.kt` |
+| `Theme.swift` (the paper palette, `bbCard`, `BBEyebrow`) | `ui/theme/Theme.kt`, `ui/Components.kt`, `ui/ReceiptSlip.kt` |
 | `Theme.swift` (`ExportStatusDot`, `bbExported`/`bbUnexported`) | `ui/Components.kt`, `ui/theme/Theme.kt` |
 | `WarningSeverity.swift` | `receipt/WarningSeverity.kt` (ranking, no Compose) + `ui/Format.kt` (its colors/icons) |
 | `PhotoSaver.swift` | `receipt/PhotoSaver.kt` |

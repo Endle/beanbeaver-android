@@ -85,6 +85,19 @@ class ReceiptPipeline(app: Application) : AndroidViewModel(app) {
 
     private var progressJob: Job? = null
 
+    /**
+     * Swap in a corrected parse without leaving the result screen — what the
+     * Review & Fix editor saves.
+     *
+     * Keeps the wall time the scan actually took: the correction re-renders the
+     * receipt, it does not re-scan it, and reporting the re-render's cost as the
+     * scan's would be a false number on the timing breakdown.
+     */
+    fun replaceResult(result: ReceiptResult) {
+        val done = _status.value as? ScanStatus.Done ?: return
+        _status.value = ScanStatus.Done(result, done.wallMs)
+    }
+
     fun reset() {
         progressJob?.cancel()
         _status.value = ScanStatus.Idle
