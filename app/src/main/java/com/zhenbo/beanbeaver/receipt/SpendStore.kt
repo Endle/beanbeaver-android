@@ -7,9 +7,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
-import uniffi.bb_mobile_ffi.spendDeclaredRoots
-import uniffi.bb_mobile_ffi.spendFallbackBudgetRoot
-import uniffi.bb_mobile_ffi.spendResolveBudgetRoot
 import uniffi.bb_receipt_ffi.ReceiptResult
 import java.io.File
 import java.util.UUID
@@ -281,72 +278,43 @@ object SpendStore {
         runCatching { ReceiptCaptureStore.file(context, filename).delete() }
     }
 
-    private const val TAG = "SpendStore"
-}
-
-/**
- * Stored budget configuration: which tracked root carries a monthly target, and
- * what that target is. Kotlin twin of iOS `BudgetPrefs`.
- *
- * Deliberately *not* an input to [SpendSummary]: the spend arithmetic is the
- * product and stands on its own, while a target is an optional overlay one screen
- * draws on top of it. Nothing here can change a number.
- */
-object BudgetPrefs {
-    private const val PREFS = "beanbeaver"
-    private const val KEY_ROOT = "budgetRootTag"
-    private const val KEY_AMOUNT = "budgetMonthlyAmount"
-
     /**
-     * Fallback when nothing is declared and nothing is stored — the app's most
-     * common use case names it directly rather than falling back to an arbitrary
-     * first tag. Defined by the shared crate so iOS cannot disagree.
-     */
-    val FALLBACK_ROOT: String by lazy { spendFallbackBudgetRoot() }
-
-    /**
-     * Root tags the current rule corpus actually declares, first-path-segment
-     * only, in the order `RuleBook.tags()` returns them, de-duplicated. What the
-     * root picker offers — never a hardcoded category list.
-     */
-    fun declaredRoots(context: Context): List<String> {
-        ItemRuleStore.ensureLoaded(context)
-        return spendDeclaredRoots((ItemRuleStore.book.value?.tags() ?: emptyList()).map { it.toFfi() })
-    }
-
-    /**
-     * The target's root tag: the user's stored choice if the corpus still declares
-     * it, else [FALLBACK_ROOT] if that's declared, else whatever the corpus
-     * declares first.
+     * Replace one record's parse with a corrected one (the Review & Fix editor).
      *
-     * The *rule* lives in the shared Rust crate (`spend_resolve_budget_root`) so
-     * iOS resolves it identically; only the storage below is Android's. The
-     * "still declares it" clause is the one that matters — a stored root can
-     * outlive the rule that produced it, and a target pointing at a category the
-     * corpus no longer has would silently draw against nothing.
+     * The whole [ReceiptResult], not a patch: an edit goes back through
+     * `reformatReceipt`, so the beancount, the accounts, the tags and the
+     * warnings are all re-derived together and there is no version of this record
+     * where some of them are corrected and the rest are not.
+     *
+     * Every spending figure follows from [records], so this is also what makes a
+     * corrected price reach the month — no separate invalidation, because
+     * `SpendSummary` is computed from these rows on each read.
      */
-    fun root(context: Context): String =
-        spendResolveBudgetRoot(prefs(context).getString(KEY_ROOT, null), declaredRoots(context))
-
-    fun setRoot(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_ROOT, value).apply()
+    fun updateResult(context: Context, id: String, result: ReceiptResult) {
+        val current = _records.value
+        val index = current.indexOfFirst { it.id == id }
+        if (index < 0) return
+        _records.value = current.toMutableList().also {
+            it[index] = it[index].copy(result = result)
+        }
+        save(context)
     }
 
     /**
-     * The monthly target, or null for tracking-only — the default, and a complete
-     * way to use the app. Stored as a plain float; 0 and unset both read as null,
-     * since a $0 target has no meaningful bar to draw.
+     * The same update addressed by identity rather than row, for the scan result
+     * screen — it holds a [ReceiptResult] straight from the pipeline and never
+     * learns the [SpendRecord.id] that recording it minted.
+     *
+     * Matched on the receipt's *previous* `beanbeaverId`, since correcting the
+     * date changes the id the edited copy will carry. A receipt with no id can't
+     * be located this way and is left alone.
      */
-    fun monthlyAmount(context: Context): Double? =
-        prefs(context).getFloat(KEY_AMOUNT, 0f).toDouble().takeIf { it > 0 }
-
-    fun setMonthlyAmount(context: Context, value: Double?) {
-        val editor = prefs(context).edit()
-        if (value != null && value > 0) editor.putFloat(KEY_AMOUNT, value.toFloat())
-        else editor.remove(KEY_AMOUNT)
-        editor.apply()
+    fun updateResult(context: Context, previous: ReceiptResult, result: ReceiptResult) {
+        val id = previous.beanbeaverId ?: return
+        val index = _records.value.indexOfFirst { it.result.beanbeaverId == id }
+        if (index < 0) return
+        updateResult(context, _records.value[index].id, result)
     }
 
-    private fun prefs(context: Context) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private const val TAG = "SpendStore"
 }

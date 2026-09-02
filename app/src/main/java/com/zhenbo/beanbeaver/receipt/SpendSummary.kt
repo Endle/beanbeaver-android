@@ -5,23 +5,31 @@ import uniffi.bb_mobile_ffi.SpendDate
 import uniffi.bb_mobile_ffi.SpendInput
 import uniffi.bb_mobile_ffi.SpendItem
 import uniffi.bb_mobile_ffi.SpendItemEntry
+import uniffi.bb_mobile_ffi.SpendMonthFacts
 import uniffi.bb_mobile_ffi.SpendTag
+import uniffi.bb_mobile_ffi.SpendTrend
+import uniffi.bb_mobile_ffi.SpendWeekday
 import uniffi.bb_mobile_ffi.spendCurrentMonthId
 import uniffi.bb_mobile_ffi.spendDefaultMonthId
 import uniffi.bb_mobile_ffi.spendItems
 import uniffi.bb_mobile_ffi.spendLeafLabel
 import uniffi.bb_mobile_ffi.spendMonth
+import uniffi.bb_mobile_ffi.spendMonthFacts
 import uniffi.bb_mobile_ffi.spendMonthId
 import uniffi.bb_mobile_ffi.spendMonthIds
 import uniffi.bb_mobile_ffi.spendMonthLabel
 import uniffi.bb_mobile_ffi.spendReceiptGroups
+import uniffi.bb_mobile_ffi.spendTrend
 import uniffi.bb_mobile_ffi.spendUncategorizedRoot
 import uniffi.bb_receipt_ffi.ItemTag
 import uniffi.bb_receipt_ffi.ReceiptItem
 import uniffi.bb_receipt_ffi.ReceiptResult
 import java.time.Instant
 import java.time.LocalDate
+import java.time.DayOfWeek
 import java.time.ZoneId
+import java.time.temporal.WeekFields
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -354,6 +362,88 @@ object SpendSummary {
             unaccounted = m.unaccounted,
         )
     }
+
+    // MARK: - Trend
+
+    /**
+     * **The weekly trend surfaces are on, and the surface they came back to is
+     * not the one that was withheld.**
+     *
+     * iOS turned these off on 2026-08-19 after seeing them against real receipts:
+     * they drew what they claimed to draw, but six weekly totals were not the
+     * information worth a third of the home card. That was a product answer, not
+     * a defect — **don't go looking for a bug here.**
+     *
+     * Back on 2026-08-21 as six **bars** — discrete weekly totals, the newest
+     * visibly partial — with the delta as the card's own header figure and
+     * nothing repeating it. One flag rather than three comment blocks, so home
+     * and the Spending card come back together.
+     */
+    const val SHOW_WEEKLY_TREND = true
+
+    /**
+     * How many weeks the charts plot. Six is what the design asks for and what
+     * fits the card's width at a legible bar spacing.
+     */
+    const val TREND_WEEKS: UInt = 6u
+
+    /** The rolling window behind the second figure beside a month total. */
+    const val ROLLING_DAYS: UInt = 30u
+
+    /**
+     * The two figures the home slip prints under a month's total, and the windows
+     * they cover.
+     *
+     * A second call rather than fields on [month]: `spend_month` is pure over
+     * records and takes no date, and these are clock-relative.
+     *
+     * Rust decides where the windows begin and end; this only resolves "today",
+     * which is the platform's job.
+     */
+    fun facts(id: String, records: List<SpendRecord>, today: LocalDate = LocalDate.now()): SpendMonthFacts =
+        spendMonthFacts(id, records.map { it.toFfi() }, today.toFfi())
+
+    /**
+     * The weekly series for [scope], or all spending when it is null.
+     *
+     * Everything about *when* a week starts is decided in Rust; the two things
+     * passed in are the two the platform genuinely owns — today as a local
+     * calendar date, and the locale's first weekday.
+     */
+    fun trend(
+        scope: Category? = null,
+        records: List<SpendRecord>,
+        today: LocalDate = LocalDate.now(),
+    ): SpendTrend = spendTrend(
+        records.map { it.toFfi() },
+        scope?.toFfi(),
+        today.toFfi(),
+        firstWeekday(),
+        TREND_WEEKS,
+        ROLLING_DAYS,
+    )
+
+    /**
+     * This locale's first weekday, named.
+     *
+     * **Named, not numbered, and that is the whole point.** `spend_trend` used to
+     * take a raw integer in ICU's numbering (`1 = Sunday`), which is what
+     * `Calendar.firstWeekday` hands iOS directly — while Kotlin's [DayOfWeek] is
+     * `MONDAY = 1`. Passing one where the other was meant is silent: nothing
+     * errors, the chart still draws, and the two apps simply bucket receipts into
+     * different weeks. The seam takes a [SpendWeekday] now, so the conversion
+     * happens here, once, as a `when` that names every day it means.
+     */
+    private fun firstWeekday(): SpendWeekday =
+        when (WeekFields.of(Locale.getDefault()).firstDayOfWeek) {
+            DayOfWeek.MONDAY -> SpendWeekday.MONDAY
+            DayOfWeek.TUESDAY -> SpendWeekday.TUESDAY
+            DayOfWeek.WEDNESDAY -> SpendWeekday.WEDNESDAY
+            DayOfWeek.THURSDAY -> SpendWeekday.THURSDAY
+            DayOfWeek.FRIDAY -> SpendWeekday.FRIDAY
+            DayOfWeek.SATURDAY -> SpendWeekday.SATURDAY
+            DayOfWeek.SUNDAY -> SpendWeekday.SUNDAY
+        }
 }
 
 // MARK: - Projection and re-attachment

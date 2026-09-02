@@ -41,6 +41,12 @@ data class DataDump(
                 "ledgerTaxAccount",
                 "skipOrientationCheck",
                 "lastScanWallMs",
+                "hideAmounts",
+                // Written by nothing since the monthly budget was removed, but
+                // still read here: a leftover value is exactly what a dump should
+                // surface.
+                "budgetRootTag",
+                "budgetMonthlyAmount",
                 DebugInfoStore.ENABLED_KEY,
             ),
             "beanbeaver_github" to listOf("githubOwner", "githubRepo"),

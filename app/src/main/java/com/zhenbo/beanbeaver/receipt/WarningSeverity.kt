@@ -1,5 +1,6 @@
 package com.zhenbo.beanbeaver.receipt
 
+import uniffi.bb_receipt_ffi.ReceiptResult
 import uniffi.bb_receipt_ffi.ReceiptWarning
 import uniffi.bb_receipt_ffi.ReceiptWarningKind
 
@@ -84,5 +85,50 @@ val ReceiptWarning.severity: WarningSeverity
 val List<ReceiptWarning>.worthShowing: List<ReceiptWarning>
     get() = filter { it.severity >= WarningSeverity.NOTICE }
 
+/**
+ * One finding shown on a receipt: a parser warning the core reported, or one this
+ * app worked out for itself from the parse.
+ *
+ * Not every finding worth a word is a [ReceiptWarning]. A missing date is a
+ * *field* of [ReceiptResult] (`dateIsPlaceholder`), not a warning, and core stays
+ * that way on purpose — what it *does* about an unknown date is a formatter
+ * decision, and what that is *worth* is this file's call, like every other
+ * severity here. This type is where the two kinds meet, so the banner and the
+ * badge read one list instead of two.
+ */
+data class ReceiptFinding(val message: String, val severity: WarningSeverity)
+
+/**
+ * Everything about this parse worth telling the user, loudest first.
+ *
+ * A receipt with no date is [WarningSeverity.ATTENTION], on the same footing as a
+ * total that doesn't add up: core substitutes *today* so the entry is still valid
+ * beancount, which means an uncorrected one files a February shop under August
+ * and nothing downstream can tell. That it lights on roughly half of a real scan
+ * pile is the finding, not a reason to soften it — unlike
+ * [ReceiptWarningKind.UNCATEGORIZED_ITEM], whose badge was retired for firing on
+ * correct parses, every one of these is a receipt whose ledger date is wrong.
+ */
+val ReceiptResult.findings: List<ReceiptFinding>
+    get() = buildList {
+        if (dateIsPlaceholder) {
+            add(
+                ReceiptFinding(
+                    "No date found on this receipt — it will be filed under today's date.",
+                    WarningSeverity.ATTENTION,
+                ),
+            )
+        }
+        addAll(warnings.worthShowing.map { ReceiptFinding(it.message, it.severity) })
+    }
+
+/**
+ * Two receivers, one name, so a `@JvmName` is required on one of them: both erase
+ * to `getHighestSeverity(List)` on the JVM.
+ */
 val List<ReceiptWarning>.highestSeverity: WarningSeverity?
+    @JvmName("highestWarningSeverity")
+    get() = maxOfOrNull { it.severity }
+
+val List<ReceiptFinding>.highestSeverity: WarningSeverity?
     get() = maxOfOrNull { it.severity }
