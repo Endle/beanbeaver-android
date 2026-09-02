@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,20 +55,24 @@ import com.zhenbo.beanbeaver.Entitlements
 import com.zhenbo.beanbeaver.debug.DebugInfoStore
 import com.zhenbo.beanbeaver.export.LedgerFileOptions
 import com.zhenbo.beanbeaver.export.MoneyManagerExport
-import com.zhenbo.beanbeaver.receipt.BudgetPrefs
 import com.zhenbo.beanbeaver.receipt.LedgerFormatPrefs
 import com.zhenbo.beanbeaver.receipt.SpendStore
-import com.zhenbo.beanbeaver.ui.theme.groupedBackground
+import com.zhenbo.beanbeaver.ui.theme.bbCanvas
 
 /**
  * The Android twin of iOS Settings. Carries what this MVP supports: the GitHub
  * sync entry point, ledger output prefs (currency + tax account), the
  * orientation-check speed toggle, a sample scan, the debug-info capture toggle +
  * viewer, and app/core versions.
+ *
+ * **A pane, not a screen.** Settings became a tab root when the bottom bar
+ * landed, so it carries no `Scaffold`, no app bar and — importantly — no
+ * `BackHandler`: system back from a tab root leaves the app, which is what a
+ * root should do. The shell owns the bar and the ground; the pushes *from* here
+ * are still full screens with their own.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(
+fun SettingsPane(
     skipOrientation: Boolean,
     onSkipOrientationChange: (Boolean) -> Unit,
     onRunSample: () -> Unit,
@@ -79,11 +84,9 @@ fun SettingsScreen(
     onOpenDataDump: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
-    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-
-    BackHandler(onBack = onBack)
 
     var currency by remember { mutableStateOf(LedgerFormatPrefs.currency(context)) }
     var taxAccount by remember { mutableStateOf(LedgerFormatPrefs.taxAccount(context)) }
@@ -102,35 +105,19 @@ fun SettingsScreen(
     // the records instead counts only photos that a kept receipt still points at,
     // which is what the row claims and what iOS's twin does.
     val capturedBytes = remember(spendRecords) { SpendStore.totalPhotoBytes(context) }
-    val budgetRoots = remember { BudgetPrefs.declaredRoots(context) }
-    var budgetRoot by remember { mutableStateOf(BudgetPrefs.root(context)) }
-    var budgetAmount by remember {
-        mutableStateOf(BudgetPrefs.monthlyAmount(context)?.let { "%.2f".format(it) } ?: "")
-    }
     var confirmClearAllPhotos by remember { mutableStateOf(false) }
     var confirmDeleteAllReceipts by remember { mutableStateOf(false) }
 
-    Scaffold(
-        containerColor = groupedBackground,
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-        ) {
+    // The list stands on the paper canvas like every other redesigned surface —
+    // it was left platform-standard by the original handoff and read as a
+    // different app once it became a tab root sitting beside Home.
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(bbCanvas)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
             SettingsSection(
                 title = "Sync",
                 footer = "File each scanned receipt into your ledger repo as a GitHub pull request.",
@@ -218,37 +205,6 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-            }
-
-            SettingsSection(
-                title = "Budget",
-                footer = "Which tracked category gets a monthly target on the Spending screen — " +
-                    "computed from your scanned receipts' items, not the receipt totals. Leave the " +
-                    "amount blank to track spend with no target.",
-            ) {
-                PresetOrCustomField(
-                    label = "Budget category",
-                    // Never a hardcoded list: the picker offers exactly the roots
-                    // the rule corpus in force declares, so an imported document
-                    // that adds a category can be budgeted the same day.
-                    presets = budgetRoots.map { it.replaceFirstChar { c -> c.uppercase() } to it },
-                    value = budgetRoot,
-                ) {
-                    budgetRoot = it
-                    BudgetPrefs.setRoot(context, it)
-                }
-                Spacer(Modifier.size(12.dp))
-                OutlinedTextField(
-                    value = budgetAmount,
-                    onValueChange = {
-                        budgetAmount = it
-                        BudgetPrefs.setMonthlyAmount(context, it.toDoubleOrNull())
-                    },
-                    label = { Text("Monthly amount") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
 
             SettingsSection(
@@ -425,9 +381,7 @@ fun SettingsScreen(
                     )
                 }
             }
-        }
     }
-
 
     if (confirmClearAllPhotos) {
         AlertDialog(

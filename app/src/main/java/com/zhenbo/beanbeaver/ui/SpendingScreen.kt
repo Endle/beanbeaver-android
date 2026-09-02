@@ -1,8 +1,10 @@
 package com.zhenbo.beanbeaver.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,19 +25,16 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,35 +44,43 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.zhenbo.beanbeaver.receipt.BudgetPrefs
 import com.zhenbo.beanbeaver.receipt.SpendRecord
 import com.zhenbo.beanbeaver.receipt.SpendStore
 import com.zhenbo.beanbeaver.receipt.SpendSummary
 import com.zhenbo.beanbeaver.receipt.unexported
 import com.zhenbo.beanbeaver.ui.theme.BbAccent
 import com.zhenbo.beanbeaver.ui.theme.BbAccentSoft
-import com.zhenbo.beanbeaver.ui.theme.groupedBackground
-import java.time.LocalDate
+import com.zhenbo.beanbeaver.ui.theme.bbCanvas
+import com.zhenbo.beanbeaver.ui.theme.bbInk
+import com.zhenbo.beanbeaver.ui.theme.bbInkSecondary
+import com.zhenbo.beanbeaver.ui.theme.bbInkTertiary
+import com.zhenbo.beanbeaver.ui.theme.bbUnexported
 
 /**
  * Where a month's money went, computed from scanned receipts' *items* rather than
  * their totals (see [SpendSummary]). Kotlin twin of iOS `SpendingView`.
  *
  * A spend tracker first: the headline is everything tracked, and the breakdown is
- * every category the classifier reached, largest first. A monthly target is an
- * optional overlay — when [BudgetPrefs.monthlyAmount] is unset, nothing
- * budget-shaped renders at all and the screen is complete without it.
+ * every category the classifier reached, largest first.
  *
- * Read-only over receipts: nothing here edits one, only the target.
+ * The monthly budget that used to overlay one category is **gone** — target bar,
+ * pace line, the "Set a Monthly Budget" row and its editor dialog. A target
+ * answers "am I allowed to spend this?", and the product's question is now "what
+ * am I spending, and is it climbing?", which the week-over-week card answers
+ * instead.
+ *
+ * The **per-leaf progress bars are gone too**: a dozen neutral capsules, each
+ * measured against the largest leaf anywhere in the month, answering a comparison
+ * nobody makes and costing every row a second line. A share percentage in a
+ * fixed-width column replaced them.
+ *
+ * Read-only over receipts: nothing here edits one.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,30 +94,34 @@ fun SpendingScreen(
     onOpenCategory: (category: SpendSummary.Category, title: String, monthId: String) -> Unit,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     BackHandler(onBack = onBack)
 
     val records by SpendStore.records.collectAsStateWithLifecycle()
     val hidden by AmountPrivacy.hideAmounts.collectAsStateWithLifecycle()
 
     var selectedMonthId by rememberSaveable { mutableStateOf<String?>(null) }
-    var monthlyAmount by remember { mutableStateOf(BudgetPrefs.monthlyAmount(context)) }
-    var showAmountDialog by rememberSaveable { mutableStateOf(false) }
+    /**
+     * Which category the week-over-week chart is trending, and which roots have
+     * had their leaf tail expanded. Both view-local and reset on entry, by
+     * design: they are ways of looking at the month, not preferences.
+     */
+    var trendScope by remember { mutableStateOf<SpendSummary.Category?>(null) }
+    var expandedRoots by remember { mutableStateOf(emptySet<String>()) }
+    var showReconciliation by rememberSaveable { mutableStateOf(false) }
 
     val monthIds = remember(records) { SpendSummary.monthIds(records) }
     val activeMonthId = selectedMonthId ?: SpendSummary.defaultMonthId(records)
     val summary = remember(records, activeMonthId) { SpendSummary.month(activeMonthId, records) }
-    // Only ever used to decorate one group — never to decide what the screen counts.
-    val targetRoot = remember(records) { BudgetPrefs.root(context) }
     val isCurrentMonth = activeMonthId == SpendSummary.currentMonthId()
 
     Scaffold(
-        containerColor = groupedBackground,
+        containerColor = bbCanvas,
         topBar = {
             TopAppBar(
                 // The screen's name, not the month it happens to be showing — the
                 // stepper below says which month, and it can page away from this one.
                 title = { Text("Spending") },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = bbCanvas),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -118,14 +129,9 @@ fun SpendingScreen(
                 },
                 actions = {
                     if (records.isNotEmpty()) {
-                        // The same single state the home card's eye and the
-                        // Settings toggle write — three places, one value.
-                        IconButton(onClick = { AmountPrivacy.toggle(context) }) {
-                            Icon(
-                                if (hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = if (hidden) "Show amounts" else "Hide amounts",
-                            )
-                        }
+                        // The same control Home's slip carries, over the same
+                        // single piece of state the Settings toggle writes.
+                        AmountPrivacyEye()
                         IconButton(onClick = { onOpenReceipts(null) }) {
                             Icon(Icons.AutoMirrored.Filled.ListAlt, contentDescription = "All receipts")
                         }
@@ -143,44 +149,40 @@ fun SpendingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            MonthStepper(
-                label = summary.label,
-                // monthIds is newest-first, so "older" moves to a higher index
-                // and "newer" moves to a lower one.
-                canGoOlder = monthIds.indexOf(activeMonthId).let { it >= 0 && it + 1 in monthIds.indices },
-                canGoNewer = monthIds.indexOf(activeMonthId).let { it >= 0 && it - 1 in monthIds.indices },
-                onOlder = {
-                    val i = monthIds.indexOf(activeMonthId)
-                    if (i + 1 in monthIds.indices) selectedMonthId = monthIds[i + 1]
-                },
-                onNewer = {
-                    val i = monthIds.indexOf(activeMonthId)
-                    if (i - 1 in monthIds.indices) selectedMonthId = monthIds[i - 1]
-                },
-            )
-
-            Headline(
-                tracked = maskedAmount(formatCurrency(summary.tracked), hidden),
-                receiptCount = summary.records.size,
-                // This month's unfiled receipts — the same `isExported` split
-                // the Receipts screen's dots and chips draw, scoped to the
-                // month on screen.
-                backlogCount = summary.records.unexported.size,
+            HeaderSlip(
+                summary = summary,
+                monthIds = monthIds,
+                activeMonthId = activeMonthId,
+                records = records,
+                hidden = hidden,
+                onSelectMonth = { selectedMonthId = it },
                 onOpenReceipts = { onOpenReceipts(activeMonthId) },
             )
+
+            // Only for the month in progress. The series is six weeks back from
+            // *today*, so beside a March total viewed in August it would be
+            // answering a question nobody asked.
+            if (SpendSummary.SHOW_WEEKLY_TREND && isCurrentMonth) {
+                WeekOverWeekCard(
+                    records = records,
+                    summary = summary,
+                    scope = trendScope,
+                    hidden = hidden,
+                    onSelectScope = { trendScope = it },
+                )
+            }
 
             summary.roots.forEach { group ->
                 RootCard(
                     group = group,
-                    maxLeafAmount = summary.maxLeafAmount,
+                    monthTotal = summary.tracked,
                     hidden = hidden,
-                    target = monthlyAmount.takeIf { group.id == targetRoot },
-                    isCurrentMonth = isCurrentMonth,
-                    onEditTarget = { showAmountDialog = true },
+                    expanded = expandedRoots.contains(group.id),
+                    onExpand = { expandedRoots = expandedRoots + group.id },
                     onOpenRoot = {
                         onOpenCategory(SpendSummary.Category.Root(group.id), group.label, activeMonthId)
                     },
@@ -190,56 +192,30 @@ fun SpendingScreen(
                 )
             }
 
-            ReconciliationCard(summary, hidden)
+            ReconciliationCard(
+                summary = summary,
+                hidden = hidden,
+                expanded = showReconciliation,
+                onToggle = { showReconciliation = !showReconciliation },
+            )
 
-            if (monthlyAmount == null) {
-                // Offered once, quietly, at the bottom — a target is opt-in and
-                // the screen is complete without one.
-                BbCard(modifier = Modifier.clickable { showAmountDialog = true }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Set a Monthly Budget",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
+            Spacer(Modifier.height(8.dp))
         }
-    }
-
-    if (showAmountDialog) {
-        BudgetAmountDialog(
-            initial = monthlyAmount,
-            rootLabel = targetRoot.replaceFirstChar { it.uppercase() },
-            onDismiss = { showAmountDialog = false },
-            onSave = {
-                BudgetPrefs.setMonthlyAmount(context, it)
-                monthlyAmount = it
-                showAmountDialog = false
-            },
-        )
     }
 }
 
 @Composable
 private fun EmptySpending(modifier: Modifier = Modifier, onScan: () -> Unit) {
     Column(
-        modifier = modifier.padding(32.dp),
+        modifier = modifier.background(bbCanvas).padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Nothing Tracked Yet", style = MaterialTheme.typography.titleMedium)
+        Text("Nothing Tracked Yet", style = MaterialTheme.typography.titleMedium, color = bbInk)
         Text(
             "Scan a receipt and its items show up here, sorted into categories.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = bbInkSecondary,
             textAlign = TextAlign.Center,
         )
         Button(onClick = onScan) {
@@ -250,310 +226,555 @@ private fun EmptySpending(modifier: Modifier = Modifier, onScan: () -> Unit) {
     }
 }
 
-@Composable
-private fun MonthStepper(
-    label: String,
-    canGoOlder: Boolean,
-    canGoNewer: Boolean,
-    onOlder: () -> Unit,
-    onNewer: () -> Unit,
-) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onOlder, enabled = canGoOlder) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Older month")
-        }
-        Text(
-            label,
-            style = MaterialTheme.typography.titleMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f),
-        )
-        IconButton(onClick = onNewer, enabled = canGoNewer) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Newer month")
-        }
-    }
-}
-
 /**
- * Everything tracked this month, and the way through to the receipts behind it.
- * The count is the tap target rather than inert text — it's the most natural
- * place to reach for when you want to see what made up the number.
+ * The month's total, the window it covers, and the way through to the receipts
+ * behind it.
+ *
+ * Same construction as Home's slip, and deliberately so: two screens whose
+ * headers are built differently read as two apps. Centred here rather than
+ * leading-aligned because this screen's job is the single figure and the stepper
+ * flanking it, while Home's slip has an eye in the corner to hang a left edge on.
+ *
+ * The figure is ink, not accent: red on a 44sp money total reads as an alarm, and
+ * a month's spending is not an alarm. Accent is kept for things that can be
+ * tapped and for the trend delta, which is the one figure here that genuinely is
+ * a signal.
  */
 @Composable
-private fun Headline(
-    tracked: String,
-    receiptCount: Int,
-    backlogCount: Int,
+private fun HeaderSlip(
+    summary: SpendSummary.Month,
+    monthIds: List<String>,
+    activeMonthId: String,
+    records: List<SpendRecord>,
+    hidden: Boolean,
+    onSelectMonth: (String) -> Unit,
     onOpenReceipts: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        // Label colour, not accent: red on a 44sp money total reads as an
-        // alarm, and "tracked spend" is not an alarm. Accent is reserved for
-        // things you can tap — the link below it, and the target bar.
+    val index = monthIds.indexOf(activeMonthId)
+    // `monthIds` is newest-first, so "older" moves to a higher index and "newer"
+    // moves to a lower one.
+    val canGoOlder = index >= 0 && index + 1 in monthIds.indices
+    val canGoNewer = index >= 0 && index - 1 in monthIds.indices
+
+    ReceiptSlip {
+        // The month stepper, on the slip's eyebrow line. **This is what replaced
+        // "tracked spend".** That subhead named the metric, which is the one
+        // thing a spending screen doesn't need to say. What a reader actually
+        // can't tell is *which* month and *how many receipts* are behind the
+        // figure, so the line says that instead, and carries the paging with it
+        // rather than spending another row on a control.
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            StepperArrow(
+                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                description = "Older month",
+                enabled = canGoOlder,
+                onClick = { if (canGoOlder) onSelectMonth(monthIds[index + 1]) },
+            )
+            BbEyebrow(
+                "${summary.label} · ${summary.receiptCount} " +
+                    "receipt${if (summary.receiptCount == 1) "" else "s"}",
+                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+            )
+            StepperArrow(
+                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                description = "Newer month",
+                enabled = canGoNewer,
+                onClick = { if (canGoNewer) onSelectMonth(monthIds[index - 1]) },
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        DisplayAmount(
+            amount = summary.tracked,
+            hidden = hidden,
+            size = 44.sp,
+            tracking = (-1.5).sp,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        MetaLine(
+            summary = summary,
+            activeMonthId = activeMonthId,
+            records = records,
+            hidden = hidden,
+            onOpenReceipts = onOpenReceipts,
+        )
+    }
+}
+
+@Composable
+private fun StepperArrow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(32.dp)) {
+        Icon(
+            icon,
+            contentDescription = description,
+            // Tertiary is a non-text token, and a chevron is not text.
+            tint = if (enabled) bbInkSecondary else bbInkTertiary,
+        )
+    }
+}
+
+/**
+ * One line under the total: what it averages per day, and the month's backlog if
+ * it has one.
+ *
+ * The backlog half is the tap target rather than inert text — "13 not exported"
+ * is the most natural thing to reach for when you want to see which ones, and it
+ * is the only place on this screen that says so.
+ *
+ * Worded "not exported", as every other surface that names this state words it —
+ * the row dots, the detail card, the Receipts chip this link leads to. This
+ * screen and that chip both used to say "unfiled", which read as a second concept
+ * rather than the same one when the link put them one tap apart.
+ */
+@Composable
+private fun MetaLine(
+    summary: SpendSummary.Month,
+    activeMonthId: String,
+    records: List<SpendRecord>,
+    hidden: Boolean,
+    onOpenReceipts: () -> Unit,
+) {
+    val facts = remember(records, activeMonthId) { SpendSummary.facts(activeMonthId, records) }
+    // This month's un-exported receipts — the same `isExported` split the
+    // Receipts screen's dots and chips draw, scoped to the month on screen.
+    val backlog = summary.records.unexported.size
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            tracked,
-            fontSize = 44.sp,
-            fontWeight = FontWeight.Bold,
+            "${maskedAmount(formatCurrency(facts.dailyAverage), hidden)}/day over " +
+                "${facts.days} day${if (facts.days == 1u) "" else "s"}",
+            fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
+            color = bbInkSecondary,
+            maxLines = 1,
         )
-        Text(
-            "tracked spend",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            modifier = Modifier.clickable(onClick = onOpenReceipts).padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "$receiptCount receipt${if (receiptCount == 1) "" else "s"}",
-                style = MaterialTheme.typography.labelMedium,
+        if (backlog > 0) {
+            Box(
+                Modifier
+                    .padding(horizontal = 8.dp)
+                    .size(width = 1.dp, height = 11.dp)
+                    .background(bbInk.copy(alpha = 0.2f)),
             )
-            if (backlogCount > 0) {
-                Spacer(Modifier.width(6.dp))
+            Row(
+                modifier = Modifier.clickable(onClick = onOpenReceipts),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
                 ExportStatusDot(SpendRecord.ExportStatus.NOT_EXPORTED, size = 7.dp)
-                Spacer(Modifier.width(4.dp))
-                Text("$backlogCount not exported", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    "$backlog not exported",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = bbUnexported,
+                    maxLines = 1,
+                )
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = bbUnexported,
+                    modifier = Modifier.size(12.dp),
+                )
             }
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
         }
     }
 }
 
 /**
- * One top-level category: its total, then the leaves beneath it. The group
- * carrying a monthly target — and only that one — also draws the target's bar and
- * pace line, so a budget reads as an annotation on the spending rather than as the
- * point of the screen.
+ * Six weeks of spending, scoped to whichever chip is selected — the card that
+ * replaced "Set a Monthly Budget".
+ *
+ * Scoping is the point rather than a refinement: "am I spending more?" is a
+ * different question for meat than for the total, and a household run that lands
+ * in one week hides a grocery trend inside an all-categories line. The delta, the
+ * mean and the caption all re-scope with it.
  */
+@Composable
+private fun WeekOverWeekCard(
+    records: List<SpendRecord>,
+    summary: SpendSummary.Month,
+    scope: SpendSummary.Category?,
+    hidden: Boolean,
+    onSelectScope: (SpendSummary.Category?) -> Unit,
+) {
+    val trend = remember(records, scope) { SpendSummary.trend(scope, records) }
+    // Every scope the chips offer: all spending, then each root with its own
+    // leaves under it. Derived from the month on screen rather than a fixed list,
+    // so a category that only appears once you scan a hardware store appears here
+    // the same day.
+    val scopes = remember(summary) {
+        buildList<Pair<String, SpendSummary.Category?>> {
+            add("All spending" to null)
+            summary.roots.forEach { root ->
+                add(root.label to SpendSummary.Category.Root(root.id))
+                root.leaves.forEach { leaf ->
+                    add(leaf.label to SpendSummary.Category.Leaf(leaf.label))
+                }
+            }
+        }
+    }
+
+    BbCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            BbEyebrow("Week over week")
+            Spacer(Modifier.weight(1f))
+            TrendDeltaLabel(trend = trend, hidden = hidden)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Mirrors the Receipts screen's chip row — same metrics, same scroll
+        // behaviour — so the two read as one control the app uses twice.
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            scopes.forEach { (label, value) ->
+                ScopeChip(
+                    label = label,
+                    selected = value == scope,
+                    onClick = { onSelectScope(value) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Bars, matching Home. A line here and bars there would be two shapes for
+        // one series, and the argument for bars is the same on both screens.
+        if (hidden) {
+            TrendChartMasked(height = 72.dp)
+        } else {
+            TrendBars(amounts = trend.amounts, labels = trend.weekLabels, height = 72.dp)
+            Spacer(Modifier.height(8.dp))
+            // The mean, as a caption rather than a rule across the bars: on a
+            // line it was a reference to read against; over bars it is one more
+            // horizontal edge competing with six of them.
+            Text(
+                "avg ${maskedAmount(formatCurrency(trend.mean), hidden)}/wk",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = bbInkSecondary,
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Pick any category to trend on its own — Meat alone, or Dairy, not just the total.",
+            fontSize = 12.sp,
+            color = bbInkSecondary,
+        )
+    }
+}
+
+@Composable
+private fun ScopeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Medium,
+        color = if (selected) androidx.compose.ui.graphics.Color.White else bbInk,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(if (selected) BbAccent else bbInk.copy(alpha = 0.07f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+    )
+}
+
+/**
+ * How many leaves a card shows before collapsing the rest.
+ *
+ * Six is the design's own card. It is enough that the long tail of a real grocery
+ * month — a dozen leaves, several of them under a dollar — doesn't turn one root
+ * into a screenful, and few enough that the tail control is visible without
+ * scrolling the card off.
+ */
+private const val VISIBLE_LEAVES = 6
+
+/** One top-level category: its total, then the leaves beneath it. */
 @Composable
 private fun RootCard(
     group: SpendSummary.RootGroup,
-    maxLeafAmount: Double,
+    monthTotal: Double,
     hidden: Boolean,
-    target: Double?,
-    isCurrentMonth: Boolean,
-    onEditTarget: () -> Unit,
+    expanded: Boolean,
+    onExpand: () -> Unit,
     onOpenRoot: () -> Unit,
     onOpenLeaf: (SpendSummary.Leaf) -> Unit,
 ) {
-    BbCard {
-        // Header and leaves both drill into the items behind the figure — the
-        // question a tapped total actually raises. `clickable` wraps the padded
-        // row rather than its content, so the whole band is the touch target
-        // instead of just the glyphs.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onOpenRoot)
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(group.label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            Text(
-                maskedAmount(formatCurrency(group.amount), hidden),
-                style = MaterialTheme.typography.titleSmall,
-                fontFamily = FontFamily.Monospace,
-            )
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    val shown = if (expanded) group.leaves else group.leaves.take(VISIBLE_LEAVES)
+    val hiddenLeaves = group.leaves.drop(shown.size)
 
-        if (target != null) {
-            Spacer(Modifier.size(4.dp))
-            TargetBar(
-                spent = group.amount,
-                target = target,
-                hidden = hidden,
-                isCurrentMonth = isCurrentMonth,
-                onEditTarget = onEditTarget,
-            )
-            Spacer(Modifier.size(8.dp))
-        }
-
-        // No spacing between leaves: each row carries its gap as padding instead,
-        // so the space between two leaves is *tappable* and belongs to one of them
-        // rather than being a dead band between rows leading to different
-        // categories, where a near miss is a wrong answer rather than a no-op.
-        group.leaves.forEach { leaf ->
+    BbCard(padding = 0.dp) {
+        RootRow(group = group, monthTotal = monthTotal, hidden = hidden, onClick = onOpenRoot)
+        shown.forEach { leaf ->
+            BbHairline()
             LeafRow(
                 leaf = leaf,
-                maxAmount = maxLeafAmount,
+                rootTotal = group.amount,
                 hidden = hidden,
                 onClick = { onOpenLeaf(leaf) },
             )
         }
+        if (hiddenLeaves.isNotEmpty()) {
+            TailRow(
+                count = hiddenLeaves.size,
+                amount = hiddenLeaves.sumOf { it.amount },
+                hidden = hidden,
+                onExpand = onExpand,
+            )
+        }
+    }
+}
+
+/** The card's own header: icon tile, name, total, share of the month, chevron. */
+@Composable
+private fun RootRow(
+    group: SpendSummary.RootGroup,
+    monthTotal: Double,
+    hidden: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            // Padding before the hit region, not after: the text band alone is
+            // well under the 48dp touch minimum.
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // A tinted square rather than a bare glyph: it gives the root rows one
+        // shared left edge down the screen, which is what makes a stack of cards
+        // read as one list of categories.
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(BbAccentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                group.label.take(1).uppercase(),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = BbAccent,
+            )
+        }
+        Text(
+            group.label,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = bbInk,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            maskedAmount(formatCurrency(group.amount), hidden),
+            fontSize = 17.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            color = bbInk,
+        )
+        SharePercent(group.amount, monthTotal, hidden)
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = bbInkTertiary,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
 /**
- * Leaf bars scale to the largest leaf anywhere in the month, so a bar means the
- * same thing in every card on the screen.
+ * A leaf. **Chevron on every row**, so the row reads as the way into its items
+ * rather than as a line in a table that happens to be tappable.
  */
 @Composable
 private fun LeafRow(
     leaf: SpendSummary.Leaf,
-    maxAmount: Double,
+    rootTotal: Double,
     hidden: Boolean,
     onClick: () -> Unit,
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(leaf.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            Text(
-                maskedAmount(formatCurrency(leaf.amount), hidden),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                fontFamily = FontFamily.Monospace,
-            )
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-        }
-        // Neutral fill, not accent. Every category on the screen drawn in alarm
-        // red makes the one bar that *is* a judgement — the target bar above,
-        // which can actually go over — indistinguishable from a dozen bars that
-        // are just measurements.
-        ProportionBar(
-            fraction = if (maxAmount > 0) leaf.amount / maxAmount else 0.0,
-            height = 6.dp,
-            track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-            fill = MaterialTheme.colorScheme.onSurfaceVariant,
+        Text(leaf.label, fontSize = 16.sp, color = bbInk, modifier = Modifier.weight(1f))
+        Text(
+            maskedAmount(formatCurrency(leaf.amount), hidden),
+            fontSize = 15.sp,
+            fontFamily = FontFamily.Monospace,
+            color = bbInk,
+        )
+        // Of its own root, not of the month: "Milk is 31% of Grocery" is the
+        // comparison the row sits inside. A share of the month would make every
+        // leaf a small number and say nothing about the card.
+        SharePercent(leaf.amount, rootTotal, hidden)
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = bbInkTertiary,
+            modifier = Modifier.size(16.dp),
         )
     }
 }
 
+/**
+ * The share column: fixed width and right-aligned, so the percentages line up
+ * down the card whether they are one digit or three.
+ *
+ * Blank while masked. A percentage is not a dollar figure, but `4%` of a hidden
+ * total next to `62%` of it still describes the month, and the point of the eye
+ * is that a glance over your shoulder learns nothing.
+ */
 @Composable
-private fun TargetBar(
-    spent: Double,
-    target: Double,
-    hidden: Boolean,
-    isCurrentMonth: Boolean,
-    onEditTarget: () -> Unit,
-) {
-    val remaining = target - spent
-    val fraction = if (target > 0) spent / target else 0.0
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ProportionBar(
-            fraction = fraction,
-            height = 10.dp,
-            track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-            fill = if (fraction > 1) MaterialTheme.colorScheme.error else BbAccent,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (remaining >= 0) {
-                    "${maskedAmount(formatCurrency(remaining), hidden)} left"
-                } else {
-                    "${maskedAmount(formatCurrency(-remaining), hidden)} over"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                "of ${maskedAmount(formatCurrency(target), hidden)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable(onClick = onEditTarget).padding(4.dp),
-            )
-        }
-        if (isCurrentMonth) {
-            // Spend-to-date against day-of-month — what makes a target actionable
-            // rather than retrospective. Current month only; for a past month the
-            // month's own total is the whole answer.
-            val today = LocalDate.now()
-            val day = today.dayOfMonth
-            val daysInMonth = today.lengthOfMonth()
-            val delta = target * day / daysInMonth - spent
-            Text(
-                if (delta >= 0) {
-                    "day $day of $daysInMonth · ${maskedAmount(formatCurrency(delta), hidden)} ahead of pace"
-                } else {
-                    "day $day of $daysInMonth · ${maskedAmount(formatCurrency(-delta), hidden)} behind pace"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+private fun SharePercent(amount: Double, total: Double, hidden: Boolean) {
+    Text(
+        if (hidden || total <= 0) "" else "${Math.round(amount / total * 100)}%",
+        fontSize = 12.sp,
+        fontFamily = FontFamily.Monospace,
+        color = bbInkSecondary,
+        textAlign = TextAlign.End,
+        modifier = Modifier.width(30.dp),
+    )
 }
 
+/**
+ * The collapsed tail, as a **control rather than a caption**.
+ *
+ * The grey "10 more items · $203.05" line this replaces read as a footnote, and
+ * footnotes don't get tapped. Accent label, the hidden sum beside it, and a
+ * chevron — the same treatment the scan result's "Show all 14 items" uses, so one
+ * pattern covers both places the app collapses a list.
+ */
 @Composable
-private fun ProportionBar(
-    fraction: Double,
-    height: androidx.compose.ui.unit.Dp,
-    track: androidx.compose.ui.graphics.Color,
-    fill: androidx.compose.ui.graphics.Color,
-) {
-    Box(
-        Modifier
+private fun TailRow(count: Int, amount: Double, hidden: Boolean, onExpand: () -> Unit) {
+    // Full-bleed, unlike the row dividers above: it separates the list from a
+    // control, not one row from the next.
+    BbHairline(startInset = 0.dp)
+    Row(
+        modifier = Modifier
             .fillMaxWidth()
-            .height(height)
-            .clip(RoundedCornerShape(percent = 50))
-            .background(track),
+            .clickable(onClick = onExpand)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth(fraction.coerceIn(0.0, 1.0).toFloat())
-                .height(height)
-                .clip(RoundedCornerShape(percent = 50))
-                .background(fill),
+        Text(
+            "Show $count more",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = BbAccent,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            maskedAmount(formatCurrency(amount), hidden),
+            fontSize = 15.sp,
+            fontFamily = FontFamily.Monospace,
+            color = bbInkSecondary,
+        )
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            tint = BbAccent,
+            modifier = Modifier.size(18.dp),
         )
     }
 }
 
 /**
  * How the headline relates to what was actually printed on the receipts. Stated
- * rather than hidden: items + tax should land on the receipt total, and when it
- * doesn't, the gap gets its own named row and a sentence saying what it usually is
- * — a scan that missed a discount line will otherwise look like arithmetic the app
- * got wrong.
+ * rather than hidden: `items + tax` should land on `receiptTotal`, and when it
+ * doesn't, the gap gets its own named row and a sentence saying what it usually
+ * is — a scan that missed a discount line will otherwise look like arithmetic the
+ * app got wrong.
+ *
+ * Collapsed to one line by default. That line states the same three figures the
+ * full breakdown leads with, so opening it is a request for the *rest* rather
+ * than the only way to learn there is a gap at all.
  */
 @Composable
-private fun ReconciliationCard(summary: SpendSummary.Month, hidden: Boolean) {
-    BbCard {
-        FooterRow("Items", maskedAmount(formatCurrency(summary.itemsTotal), hidden))
-        if (summary.tax > 0) {
-            FooterRow("Tax", maskedAmount(formatCurrency(summary.tax), hidden))
+private fun ReconciliationCard(
+    summary: SpendSummary.Month,
+    hidden: Boolean,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val parts = buildList {
+        add("Items ${maskedAmount(formatCurrency(summary.itemsTotal), hidden)}")
+        if (summary.tax > 0) add("tax ${maskedAmount(formatCurrency(summary.tax), hidden)}")
+        summary.unaccounted?.let {
+            add("${maskedAmount(formatCurrency(it), hidden)} unaccounted")
         }
-        FooterRow("Receipt total", maskedAmount(formatCurrency(summary.receiptTotal), hidden))
-        summary.unaccounted?.let { gap ->
-            FooterRow("Unaccounted", maskedAmount(formatCurrency(gap), hidden))
+    }
+
+    BbCard {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "Items and tax don't add up to what the receipts say — usually a discount or a " +
-                    "line the scan didn't read.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
+                parts.joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = bbInkSecondary,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowDown
+                else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = bbInkTertiary,
+                modifier = Modifier.size(18.dp),
             )
         }
-        if (summary.excludedCount > 0) {
-            val n = summary.excludedCount
-            FooterRow("Excluded", "$n receipt${if (n == 1) "" else "s"}")
-        }
-        if (summary.unreadablePriceCount > 0) {
-            FooterRow("Unreadable prices", "${summary.unreadablePriceCount}")
+
+        AnimatedVisibility(visible = expanded) {
+            Column {
+                Spacer(Modifier.height(6.dp))
+                BbHairline(startInset = 0.dp)
+                Spacer(Modifier.height(6.dp))
+                FooterRow("Items", maskedAmount(formatCurrency(summary.itemsTotal), hidden))
+                if (summary.tax > 0) {
+                    FooterRow("Tax", maskedAmount(formatCurrency(summary.tax), hidden))
+                }
+                FooterRow(
+                    "Receipt total",
+                    maskedAmount(formatCurrency(summary.receiptTotal), hidden),
+                )
+                summary.unaccounted?.let { gap ->
+                    FooterRow("Unaccounted", maskedAmount(formatCurrency(gap), hidden))
+                    Text(
+                        "Items and tax don't add up to what the receipts say — usually a " +
+                            "discount or a line the scan didn't read.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = bbInkSecondary,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                if (summary.excludedCount > 0) {
+                    val n = summary.excludedCount
+                    FooterRow("Excluded", "$n receipt${if (n == 1) "" else "s"}")
+                }
+                if (summary.unreadablePriceCount > 0) {
+                    FooterRow("Unreadable prices", "${summary.unreadablePriceCount}")
+                }
+            }
         }
     }
 }
@@ -564,53 +785,14 @@ private fun FooterRow(label: String, value: String) {
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = bbInkSecondary,
             modifier = Modifier.weight(1f),
         )
         Text(
             value,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = bbInkSecondary,
             fontFamily = FontFamily.Monospace,
         )
     }
-}
-
-/**
- * Editor for the monthly target — the one budget thing this screen itself changes;
- * which root the target applies to stays a Settings concern, same store, so the
- * two can't drift.
- */
-@Composable
-private fun BudgetAmountDialog(
-    initial: Double?,
-    rootLabel: String,
-    onDismiss: () -> Unit,
-    onSave: (Double?) -> Unit,
-) {
-    var text by remember { mutableStateOf(initial?.let { "%.2f".format(it) } ?: "") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Monthly Budget") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Amount") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "A monthly target for tracked $rootLabel spend, computed from your scanned " +
-                        "receipts' items. Leave blank to track spend with no target.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(text.toDoubleOrNull()) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

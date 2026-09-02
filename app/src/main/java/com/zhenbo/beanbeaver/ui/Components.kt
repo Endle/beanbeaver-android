@@ -19,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -28,28 +27,35 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhenbo.beanbeaver.receipt.SpendRecord
 import com.zhenbo.beanbeaver.ui.theme.BbAccentSoft
+import com.zhenbo.beanbeaver.ui.theme.bbCardFill
+import com.zhenbo.beanbeaver.ui.theme.bbCardShadow
 import com.zhenbo.beanbeaver.ui.theme.bbExported
 import com.zhenbo.beanbeaver.ui.theme.bbUnexported
-import com.zhenbo.beanbeaver.ui.theme.cardBackground
 
 /**
- * Card container: raised surface, rounded corners, soft shadow — the Kotlin twin
- * of iOS `bbCard()`. Content is laid out in a [ColumnScope] so callers stack
- * fields the way a SwiftUI `VStack` would inside `.bbCard()`.
+ * Card container: warm paper, 20dp corners, one soft shadow — the Kotlin twin of
+ * iOS `bbCard()`. Content is laid out in a [ColumnScope] so callers stack fields
+ * the way a SwiftUI `VStack` would inside `.bbCard()`.
+ *
+ * [padding] is a parameter because the redesign has rows that must reach the
+ * card's edge — a divider inset 16dp from the leading edge only, and a
+ * full-bleed rule above a "Show 4 more" control. Those cards pass `0.dp` and pad
+ * their own rows. Everything else takes the default and looks as it did.
  */
 @Composable
 fun BbCard(
     modifier: Modifier = Modifier,
+    padding: Dp = 16.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(20.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 3.dp, shape = shape, spotColor = Color.Black.copy(alpha = 0.10f))
+            .shadow(elevation = 3.dp, shape = shape, spotColor = bbCardShadow)
             .clip(shape)
-            .background(cardBackground)
-            .padding(16.dp),
+            .background(bbCardFill)
+            .padding(padding),
         content = content,
     )
 }
