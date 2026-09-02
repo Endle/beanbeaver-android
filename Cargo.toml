@@ -130,7 +130,7 @@ codegen-units = 1
 # there. Accepted deliberately. No FFI surface change: the diff under
 # crates/ffi/ is private constants moving out plus a doc comment.
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.10.0" }
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.13.0" }
 # The library the app actually loads. It re-exports nothing and is called only
 # through the generated Kotlin; the dependency exists so `cargo build -p
 # bb-mobile-ffi` produces libbb_mobile_ffi.so, which carries BOTH uniffi
@@ -155,7 +155,7 @@ bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1
 # which has been wrong since beanbeaver-ios 3c580a6 (2026-07-01, "drop CoreML --
 # CPU wins on speed and accuracy"). Corrected in the umbrella CLAUDE.md (
 # bb-workspace #1); fixed here because the same sentence had been copied in.
-bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.7" }
+bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.15" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }

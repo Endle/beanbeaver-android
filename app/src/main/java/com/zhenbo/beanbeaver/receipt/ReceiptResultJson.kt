@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.bb_receipt_ffi.FieldConfidences
 import uniffi.bb_receipt_ffi.ItemTag
+import uniffi.bb_receipt_ffi.MerchantDetails
 import uniffi.bb_receipt_ffi.MerchantMatch
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.Phase
@@ -27,6 +28,20 @@ import uniffi.bb_receipt_ffi.ScanTimings
  * grows new [ReceiptResult] fields.
  */
 object ReceiptResultJson {
+
+    /**
+     * What core returns for a receipt whose address block it found nothing in —
+     * every field absent. Kotlin twin of iOS's `MerchantDetails.empty`.
+     */
+    private val EMPTY_MERCHANT_DETAILS = MerchantDetails(
+        streetAddress = null,
+        city = null,
+        region = null,
+        postalCode = null,
+        phoneNumber = null,
+        storeNumber = null,
+        rawLines = emptyList(),
+    )
 
     fun encode(r: ReceiptResult): JSONObject {
         val items = JSONArray()
@@ -105,6 +120,7 @@ object ReceiptResultJson {
         return ReceiptResult(
             merchant = o.getString("merchant"),
             merchantMatch = merchantMatch,
+            merchantDetails = EMPTY_MERCHANT_DETAILS,
             date = o.optNullableString("date"),
             dateIsPlaceholder = o.optBoolean("dateIsPlaceholder", false),
             total = o.getString("total"),
@@ -113,7 +129,12 @@ object ReceiptResultJson {
             items = items,
             warnings = o.getJSONArray("warnings").decodeWarnings(),
             // Not persisted — defaulted so an old batch file still loads and the
-            // card/export never depend on them (see the class KDoc).
+            // card/export never depend on them (see the class KDoc). Core
+            // v0.12.0's `merchantDetails` above is the same story with one extra
+            // reason: it carries a street address, a phone number and the raw
+            // lines they were read from, and this app does not write anything to
+            // disk that no screen reads. Whichever feature first needs them after
+            // a reload can widen the schema and say why.
             rawText = "",
             imageFilename = "receipt.jpg",
             tenders = emptyList(),
