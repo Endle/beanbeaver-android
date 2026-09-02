@@ -101,6 +101,9 @@ fun ReceiptEditorScreen(
 ) {
     val context = LocalContext.current
     var draft by remember(original) { mutableStateOf(ReceiptEditDraft.of(original)) }
+    // The parse already carries the ISO string; no need to build a second draft
+    // just to read it back out.
+    var dateText by remember(original) { mutableStateOf(original.date ?: "") }
     var editingItem by remember { mutableStateOf<String?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
@@ -206,23 +209,32 @@ fun ReceiptEditorScreen(
                 // date *away* through `ReceiptEdits`, so this offers the
                 // direction that exists rather than a control that would
                 // half-work.
+                //
+                // The raw text is its own state, not `draft.dateIso`: a
+                // half-typed "2026-0" doesn't parse, so a field rendered from the
+                // parsed value would refuse every keystroke until the last one
+                // and read as frozen.
                 OutlinedTextField(
-                    value = draft.dateIso ?: "",
+                    value = dateText,
                     onValueChange = { text ->
-                        draft = draft.copy(
-                            date = runCatching { LocalDate.parse(text) }.getOrNull() ?: draft.date,
-                        )
+                        dateText = text
+                        val parsed = runCatching { LocalDate.parse(text) }.getOrNull()
+                        if (parsed != null) draft = draft.copy(date = parsed)
                     },
                     label = { Text("Date") },
                     placeholder = { Text("YYYY-MM-DD") },
                     singleLine = true,
+                    isError = dateText.isNotEmpty() &&
+                        runCatching { LocalDate.parse(dateText) }.isFailure,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (draft.date == null) {
                     Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = { draft = draft.copy(date = LocalDate.now()) }) {
-                        Text("Use today's date")
-                    }
+                    TextButton(onClick = {
+                        val today = LocalDate.now()
+                        draft = draft.copy(date = today)
+                        dateText = today.toString()
+                    }) { Text("Use today's date") }
                 }
             }
 
