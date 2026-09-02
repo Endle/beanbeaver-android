@@ -88,7 +88,7 @@ data class SpendRecord(
      * while the list only ever has to answer "is this filed yet".
      *
      * Two states, and [isExcluded] is deliberately not a third. Exclusion is
-     * budget-scoped — it leaves the stored parse and everything an export ships
+     * totals-scoped — it leaves the stored parse and everything an export ships
      * untouched — so an excluded receipt is still in the backlog and still goes
      * out with it. A grey "excluded" dot would sit on a row that the export bar
      * below is about to file, and under a chip counting it as unexported. The
@@ -178,7 +178,11 @@ object SpendSummary {
      * screen lists, so a month reads as "where the money went", largest first.
      */
     data class RootGroup(
-        /** The raw root tag ("grocery") — matches the stored budget root. */
+        /**
+         * The raw root tag ("grocery"), not the display label — what a
+         * [Category.Root] is selected by, and what the Spending screen's
+         * trend chips carry.
+         */
         val id: String,
         /** The authored display label ("Grocery"), from the tag vocabulary. */
         val label: String,

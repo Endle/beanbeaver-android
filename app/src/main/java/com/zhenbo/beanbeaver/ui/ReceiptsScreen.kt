@@ -157,7 +157,14 @@ fun ReceiptsScreen(
     val activeFilter = filter
         ?: monthChips.firstOrNull()?.let { ReceiptFilter.Month(it.id) }
         ?: ReceiptFilter.All
-    val records = scopedRecords.filter(activeFilter::matches)
+    // `remember`d, unlike the old chips: `ReceiptFilter.Month.matches` crosses the
+    // FFI per record, so filtering in the composable body would re-cross the whole
+    // list on every recomposition. (Same shape as the iOS measurement in the
+    // umbrella CLAUDE.md — Compose's memoization is what keeps it off the
+    // per-frame path here.)
+    val records = remember(scopedRecords, activeFilter) {
+        scopedRecords.filter(activeFilter::matches)
+    }
 
     /**
      * The leading category across the receipts on screen, and what each receipt
@@ -532,7 +539,8 @@ private fun EmptyState(title: String, message: String, modifier: Modifier = Modi
 /**
  * Facts about the row that aren't its export status — everything the dot doesn't
  * already say. Which target a receipt reached moved to the detail screen with
- * the dot; what's left is the photo and the budget exclusion, which is a fact
+ * the dot; what's left is the category share, the photo and the exclusion,
+ * which is a fact
  * about the row rather than a state of its export (see
  * [SpendRecord.ExportStatus] for why the dot deliberately doesn't carry it).
  *

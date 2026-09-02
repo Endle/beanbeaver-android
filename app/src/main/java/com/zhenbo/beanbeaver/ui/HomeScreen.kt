@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -172,8 +173,10 @@ private fun HeaderSlip(
                 modifier = Modifier.weight(1f),
             )
             // Cancels the touch target's own padding so the glyph sits in the
-            // slip's corner rather than inset from it.
-            AmountPrivacyEye(modifier = Modifier.padding(end = (-12).dp))
+            // slip's corner rather than inset from it. An offset, not negative
+            // padding — `Modifier.padding` requires a non-negative value and
+            // throws at composition, which a preview would not have caught.
+            AmountPrivacyEye(modifier = Modifier.offset(x = 12.dp))
         }
 
         Spacer(Modifier.height(12.dp))
@@ -218,8 +221,9 @@ private fun WeeklyCard(records: List<SpendRecord>, hidden: Boolean) {
     val trend = remember(records) { SpendSummary.trend(records = records) }
     BbCard {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            BbEyebrow("Weekly spend", modifier = Modifier.weight(1f, fill = false))
-            Spacer(Modifier.width(8.dp))
+            BbEyebrow("Weekly spend")
+            // The eyebrow is a fixed label anyone can guess; the figure is the
+            // news, so the spacer yields to it rather than the other way round.
             Spacer(Modifier.weight(1f))
             TrendDeltaLabel(trend = trend, hidden = hidden)
         }
