@@ -88,19 +88,19 @@ BeanBeaver relies on the permissive option in each case.
 
 ### MIT OR Apache-2.0
 
-aligned 0.4.3, allocator-api2 0.2.21, anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0, anstyle-query 1.1.5, anyhow 1.0.103, arrayvec 0.7.8, as-slice 0.2.1, askama 0.12.1, askama_escape 0.10.3, askama_parser 0.2.1, base64 0.22.1, basic-toml 0.1.10, bitflags 2.13.1, block-buffer 0.10.4, bumpalo 3.20.3, camino 1.2.4, cargo-platform 0.1.9, cc 1.2.67, cfg-if 1.0.4, clap 4.6.2, clap_builder 4.6.2, clap_derive 4.6.1, clap_lex 1.1.0, colorchoice 1.0.5, cpufeatures 0.2.17, crc32fast 1.5.0, crossbeam-deque 0.8.7, crossbeam-epoch 0.9.20, crossbeam-utils 0.8.22, crypto-common 0.1.7, digest 0.10.7, either 1.16.0, fdeflate 0.3.7, find-msvc-tools 0.1.9, flate2 1.1.9, geo 0.29.3, geo-types 0.7.19, getrandom 0.2.17, gif 0.14.2, glob 0.3.3, half 2.7.1, hash32 0.3.1, hashbrown 0.16.1, hashbrown 0.17.1, heapless 0.8.0, heck 0.5.0, http 1.4.2, httparse 1.10.1, image 0.25.10, image-webp 0.2.4, is_terminal_polyfill 1.70.2, itertools 0.11.0, itertools 0.12.1, itertools 0.14.0, itoa 1.0.18, jobserver 0.1.35, libc 0.2.186, log 0.4.33, mime 0.3.17, native-tls 0.2.18, ndarray 0.17.2, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.46, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, once_cell 1.21.4, openssl-probe 0.2.1, ort 2.0.0-rc.12, ort-sys 2.0.0-rc.12, paste 1.0.15, pastey 0.1.1, percent-encoding 2.3.2, pkg-config 0.3.33, png 0.18.1, ppv-lite86 0.2.21, proc-macro2 1.0.106, profiling 1.0.18, profiling-procmacros 1.0.18, quote 1.0.46, rand 0.8.7, rand_chacha 0.3.1, rand_core 0.6.4, rand_distr 0.4.3, rayon 1.12.0, rayon-core 1.13.0, regex 1.13.1, regex-automata 0.4.16, regex-syntax 0.8.11, robust 1.2.0, rstar 0.12.2, rustls-pki-types 1.15.0, rustversion 1.0.23, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_spanned 0.6.9, sha2 0.10.9, shlex 2.0.1, smallvec 1.15.2, spade 2.15.1, stable_deref_trait 1.2.1, static_assertions 1.1.0, syn 2.0.119, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, toml 0.8.23, toml_datetime 0.6.11, toml_edit 0.22.27, toml_write 0.1.2, ttf-parser 0.25.1, typenum 1.20.1, unicase 2.9.0, ureq 3.3.0, ureq-proto 0.6.0, utf8-zero 0.8.1, wasm-bindgen 0.2.126, wasm-bindgen-macro 0.2.126, wasm-bindgen-macro-support 0.2.126, wasm-bindgen-shared 0.2.126, weezl 0.1.12
+allocator-api2 0.2.21, anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0, anstyle-query 1.1.5, anyhow 1.0.103, askama 0.12.1, askama_escape 0.10.3, askama_parser 0.2.1, base64 0.22.1, basic-toml 0.1.10, bitflags 2.13.1, block-buffer 0.10.4, camino 1.2.4, cargo-platform 0.1.9, cc 1.2.67, cfg-if 1.0.4, clap 4.6.2, clap_builder 4.6.2, clap_derive 4.6.1, clap_lex 1.1.0, colorchoice 1.0.5, cpufeatures 0.2.17, crc32fast 1.5.0, crossbeam-deque 0.8.7, crossbeam-epoch 0.9.20, crossbeam-utils 0.8.22, crypto-common 0.1.7, digest 0.10.7, either 1.16.0, fdeflate 0.3.7, find-msvc-tools 0.1.9, flate2 1.1.9, geo 0.29.3, geo-types 0.7.19, getrandom 0.2.17, glob 0.3.3, hash32 0.3.1, hashbrown 0.16.1, hashbrown 0.17.1, heapless 0.8.0, heck 0.5.0, http 1.4.2, httparse 1.10.1, image 0.25.10, image-webp 0.2.4, is_terminal_polyfill 1.70.2, itertools 0.11.0, itertools 0.12.1, itoa 1.0.18, libc 0.2.186, log 0.4.33, mime 0.3.17, native-tls 0.2.18, ndarray 0.17.2, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.46, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, once_cell 1.21.4, openssl-probe 0.2.1, ort 2.0.0-rc.12, ort-sys 2.0.0-rc.12, paste 1.0.15, percent-encoding 2.3.2, pkg-config 0.3.33, png 0.18.1, ppv-lite86 0.2.21, proc-macro2 1.0.106, quote 1.0.46, rand 0.8.7, rand_chacha 0.3.1, rand_core 0.6.4, rand_distr 0.4.3, rayon 1.12.0, rayon-core 1.13.0, regex 1.13.1, regex-automata 0.4.16, regex-syntax 0.8.11, robust 1.2.0, rstar 0.12.2, rustls-pki-types 1.15.0, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_spanned 0.6.9, sha2 0.10.9, shlex 2.0.1, smallvec 1.15.2, spade 2.15.1, stable_deref_trait 1.2.1, static_assertions 1.1.0, syn 2.0.119, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, toml 0.8.23, toml_datetime 0.6.11, toml_edit 0.22.27, toml_write 0.1.2, ttf-parser 0.25.1, typenum 1.20.1, unicase 2.9.0, ureq 3.3.0, ureq-proto 0.6.0, utf8-zero 0.8.1
 
 ### MIT
 
-aligned-vec 0.6.4, arg_enum_proc_macro 0.3.4, av-scenechange 0.14.1, bb-mobile-ffi 0.1.0, bb-receipt-ffi 0.9.1, bincode 1.3.3, built 0.8.1, bytes 1.12.1, cargo_metadata 0.15.4, color_quant 1.1.0, equator 0.4.2, equator-macro 0.4.2, fax 0.2.7, float_next_after 1.0.0, generic-array 0.14.7, geographiclib-rs 0.2.7, goblin 0.8.2, i_float 1.6.0, i_key_sort 0.2.0, i_overlay 1.9.4, i_shape 1.6.0, i_tree 0.8.3, imageproc 0.25.1, libm 0.2.16, loop9 0.1.5, maybe-rayon 0.1.1, mime_guess 2.0.5, new_debug_unreachable 1.0.6, nom 7.1.3, nom 8.0.0, noop_proc_macro 0.3.0, ocr-paddle 0.9.1, openssl-sys 0.9.117, pulp 0.22.3, pulp-wasm-simd-flag 0.1.1, reborrow 0.5.5, receipt-core 0.9.1, receipt-image 0.9.1, rgb 0.8.53, scan 0.9.1, scroll 0.12.0, scroll_derive 0.12.1, simd-adler32 0.3.10, simd_helpers 0.1.0, smawk 0.3.3, spend-core 0.1.0, strsim 0.11.1, textwrap 0.16.2, tiff 0.11.3, tracing 0.1.44, tracing-core 0.1.36, weedle2 5.0.0, winnow 0.7.15, y4m 0.8.0, zmij 1.0.23
+bb-mobile-ffi 0.1.0, bb-receipt-ffi 0.14.2, bincode 1.3.3, bytes 1.12.1, cargo_metadata 0.15.4, float_next_after 1.0.0, generic-array 0.14.7, geographiclib-rs 0.2.7, goblin 0.8.2, i_float 1.6.0, i_key_sort 0.2.0, i_overlay 1.9.4, i_shape 1.6.0, i_tree 0.8.3, imageproc 0.25.1, libm 0.2.16, mime_guess 2.0.5, nom 7.1.3, ocr-paddle 0.14.2, openssl-sys 0.9.117, receipt-core 0.14.2, receipt-image 0.14.2, scan 0.14.2, scroll 0.12.0, scroll_derive 0.12.1, simd-adler32 0.3.10, smawk 0.3.3, spend-core 0.1.0, strsim 0.11.1, textwrap 0.16.2, tracing 0.1.44, tracing-core 0.1.36, weedle2 5.0.0, winnow 0.7.15, zmij 1.0.23
 
 ### MIT/Apache-2.0
 
-askama_derive 0.12.5, bitstream-io 4.10.0, foreign-types 0.3.2, foreign-types-shared 0.1.1, fs-err 2.11.0, matrixmultiply 0.3.11, minimal-lexical 0.2.1, openssl-macros 0.1.1, plain 0.2.3, qoi 0.4.1, quick-error 2.0.1, rawpointer 0.2.1, siphasher 0.3.11, socks 0.3.4, toml 0.5.11, vcpkg 0.2.15, version_check 0.9.5
+askama_derive 0.12.5, foreign-types 0.3.2, foreign-types-shared 0.1.1, fs-err 2.11.0, matrixmultiply 0.3.11, minimal-lexical 0.2.1, openssl-macros 0.1.1, plain 0.2.3, quick-error 2.0.1, rawpointer 0.2.1, siphasher 0.3.11, socks 0.3.4, toml 0.5.11, vcpkg 0.2.15, version_check 0.9.5
 
 ### Apache-2.0 OR MIT
 
-autocfg 1.5.1, base64ct 1.8.3, der 0.8.1, equivalent 1.0.2, indexmap 2.14.0, no_std_io2 0.9.4, pem-rfc7468 1.0.0, pin-project-lite 0.2.17, utf8parse 0.2.2, zeroize 1.9.0
+autocfg 1.5.1, base64ct 1.8.3, der 0.8.1, equivalent 1.0.2, indexmap 2.14.0, pem-rfc7468 1.0.0, pin-project-lite 0.2.17, utf8parse 0.2.2, zeroize 1.9.0
 
 ### MPL-2.0
 
@@ -110,29 +110,13 @@ uniffi 0.28.3, uniffi_bindgen 0.28.3, uniffi_checksum_derive 0.28.3, uniffi_core
 
 ab_glyph 0.2.32, ab_glyph_rasterizer 0.1.10, approx 0.5.1, lzma-rust2 0.15.8, openssl 0.10.81, owned_ttf_parser 0.25.1, simba 0.8.1
 
-### BSD-3-Clause
-
-avif-serialize 0.8.9, exr 1.74.2, lebe 0.5.3, nalgebra 0.32.6, ravif 0.13.0
-
 ### Unlicense OR MIT
 
 aho-corasick 1.1.4, byteorder 1.5.0, byteorder-lite 0.1.0, memchr 2.8.3
 
-### BSD-2-Clause
-
-av1-grain 0.2.5, rav1e 0.8.1, v_frame 0.3.9
-
-### MIT OR Apache-2.0 OR Zlib
-
-zune-core 0.5.1, zune-inflate 0.2.54, zune-jpeg 0.5.15
-
 ### Zlib OR Apache-2.0 OR MIT
 
 bytemuck 1.25.1, safe_arch 0.7.4, wide 0.7.33
-
-### BSD-2-Clause OR Apache-2.0 OR MIT
-
-zerocopy 0.8.54, zerocopy-derive 0.8.54
 
 ### BSD-3-Clause OR Apache-2.0
 
@@ -142,6 +126,10 @@ moxcms 0.8.1, pxfm 0.1.30
 
 earcutr 0.4.3, hmac-sha256 1.1.14
 
+### MIT OR Apache-2.0 OR Zlib
+
+zune-core 0.5.1, zune-jpeg 0.5.15
+
 ### (MIT OR Apache-2.0) AND Unicode-3.0
 
 unicode-ident 1.0.24
@@ -150,13 +138,13 @@ unicode-ident 1.0.24
 
 adler2 2.0.1
 
-### Apache-2.0/MIT
+### BSD-2-Clause OR Apache-2.0 OR MIT
 
-bit_field 0.10.3
+zerocopy 0.8.54
 
-### CC0-1.0 OR Apache-2.0
+### BSD-3-Clause
 
-imgref 1.12.2
+nalgebra 0.32.6
 
 ### CDLA-Permissive-2.0
 
