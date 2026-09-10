@@ -413,8 +413,8 @@ and no fastlane metadata.
 
 | Dep | Why | Pinned at |
 |---|---|---|
-| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.15 |
-| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.13.0 |
+| `bb-mobile-ffi` (beanbeaver-mobile-util) | **the library that ships.** Carries both UniFFI namespaces; `build-android.sh` builds *this* into `libbb_mobile_ffi.so` | v0.1.20 |
+| `bb-receipt-ffi` (beanbeaver-core) | only for `shared/src/bin/batch_e2e.rs`, which uses the core's **Rust** API | v0.14.2 |
 
 The `shared/` submodule pointer is a **third** thing to move and is not covered by
 either pin: `shared/src/bin/` is compiled into this package, so a mobile-util tag
@@ -432,8 +432,8 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
 
 ## Conventions & open items
 
-- **Core tag:** in step with iOS at **v0.13.0**, reached *through* mobile-util
-  v0.1.15 — see the table above before bumping either. When bumping, update **this**
+- **Core tag:** in step with iOS at **v0.14.2**, reached *through* mobile-util
+  v0.1.20 — see the table above before bumping either. When bumping, update **this**
   `Cargo.toml` and the iOS root together, rerun `./build-android.sh` here and
   `./build-xcframework.sh` in iOS. Check `crates/ffi/src/lib.rs` in the tag range
   first: a parser/rules-only bump needs no Kotlin change, but an FFI signature
@@ -452,6 +452,19 @@ together. The umbrella `~/src/bb/CLAUDE.md` owns the full order.
   kinds are open by contract — `WarningSeverity.kt`'s `else ->` ranks it and
   `WarningSeverityTest` fails if it goes unranked. Adding is safe; renaming or
   removing a variant would not be.
+
+  **An added RECORD FIELD is the other additive change, and it is not free.**
+  v0.13.2 added `ReceiptItem.tag_path` and v0.14.0 added `item_number` to both
+  `ReceiptItem` and `EditedItem`. UniFFI's generated data class has no
+  defaults, so every construction site fails to compile until it passes the
+  new parameter — which is the good outcome. The bad one is a **positional**
+  call: `ReceiptItem(description, price, quantity, account, tags)` in
+  `SpendSummaryTest` would have compiled against a same-typed neighbour and
+  shifted every argument. All construction sites are named now; keep them
+  that way. The sites, for the next field: `receipt/ReceiptResultJson.kt`
+  (decode — persist the field too, so a batch draft round-trips through
+  Review & Fix), `receipt/ReceiptEditing.kt` (`edited()`), and the test
+  fixture. `batch_e2e.rs` constructs neither record, so it does not move.
 - **A core bump can move the MODEL SET, and that is not visible in
   `crates/ffi/`.** v0.10.0 renamed the textline-orientation weights
   (`PP-LCNet_x1_0` → `PP-LCNet_x0_25`, `ocr-models-v1` → `-v2`), and core resolves

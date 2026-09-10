@@ -130,7 +130,66 @@ codegen-units = 1
 # there. Accepted deliberately. No FFI surface change: the diff under
 # crates/ffi/ is private constants moving out plus a doc comment.
 # Rerun ./build-android.sh after bumping to regenerate the Kotlin glue.
-bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.13.0" }
+# v0.13.1 is parser + rules only, no FFI change: a curled receipt whose price
+# column drifts most of a row at the top of the item block and is straight by
+# the bottom (core #97); COCKTAIL JCE / PC 100% CRAN classify as juice; DEPOSIT
+# VL files to Expenses:Deposit instead of FIXME.
+#
+# v0.13.2 adds ONE field to the UniFFI surface: `ReceiptItem.tag_path`, the
+# classification path that actually won and claimed the account. It used to be
+# recovered from `tags.last()`, which only worked while the deepest tag was the
+# winning one -- a discount line carries `discount` alongside `grocery/dairy`,
+# and which of them sorts last is not a fact about the classifier. Additive on
+# the wire, but the generated Kotlin data class gains a constructor parameter
+# with no default, so every `ReceiptItem(...)` construction site had to pass
+# it -- and a POSITIONAL call (SpendSummaryTest's helper was one) would have
+# shifted silently rather than failed, so they are all named now. The rest of
+# the release is receipt-core's structural refactor -- `fields.rs` split into
+# `fields/{amounts,dates,prices,tenders}`, the spatial and text engines into
+# `rows`/`pairing` modules, and the detection page becoming a type whose
+# normalization passes run through a runner.
+#
+# v0.14.0 adds ONE more field, in the same shape and with the same consequence:
+# `item_number`, the merchant's printed item code, on BOTH `ReceiptItem` and
+# `EditedItem`. Kept as a string because the codes have leading zeros that a
+# number would eat. The construction sites here are `ReceiptResultJson.decode`
+# (the batch draft on disk -- an older file has no such key, and null is right
+# because the code is only ever read off the receipt) and `ReceiptEditing.kt`'s
+# `edited()`. The edit path carries the code rather than dropping it: core
+# preserves the prior code only while the description is unchanged, so a
+# RENAMED line loses its item number unless the caller hands the original back.
+#
+# Also in v0.14.0: a parser fix for suggested-retail rows -- OCR can fuse a
+# receipt's Chinese sub-line onto the `REG$` marker ("MF7KREG$1.99"), and the
+# backward description walk used to read that as the product name, burying the
+# real one on the line above. Plus five classifier rules (OASIS, bare SAUCE,
+# NOODLE SAUCE, BUTTER FLAVORED, PROSPER UNITY).
+#
+# v0.14.1 is a pure parser patch -- `crates/ffi/` is byte-identical to v0.14.0,
+# so nothing here needed a hand edit, only regenerated bindings. It carries two
+# fixes, both found on real XV scans: three defects from a Canadian Tire and a
+# Costco pay-station receipt, and a Costco discount row surviving OCR that drops
+# the slash in `TPD/<sku>`. The latter cost a 300.08 receipt one of its two
+# -6.00 rows -- the total read correctly while the ledger sat 6.00 from
+# balancing -- because the bare `TPD` spelling lost both the parser's
+# alpha-ratio waiver and the classifier's discount keyword.
+#
+# v0.14.2 is another pure parser patch -- `crates/ffi/` byte-identical again,
+# regenerated bindings only. It fixes amounts landing on the sub-line *above*
+# their item when perspective lifts the amount column relative to the text
+# column: on the XV Foody Mart scan that found it, the two candidate rows
+# overlapped the contested amount by exactly 0.745 each, so first-fit gave it
+# to the row above and the receipt parsed 14 lines for a printed 16, running
+# 1.96 short of its own subtotal. What breaks that tie is arithmetic, not
+# geometry -- a `1 @ $0.98` row cannot be holding 3.99. Measured over the
+# 143-receipt corpus: no receipt regresses live or cached, and one unrelated
+# Bestco Fresh receipt gets an item back.
+#
+# The model set is unchanged across v0.13.0 -> v0.14.2 (`docs/ocr-models.md`
+# and `model_files.rs` are byte-identical), so ModelStore.kt, models/README.md,
+# the recorded hashes in scripts/ort-required-ops.config and the `shared/`
+# submodule all stay where they are -- iOS did not move its submodule either.
+bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.14.2" }
 # The library the app actually loads. It re-exports nothing and is called only
 # through the generated Kotlin; the dependency exists so `cargo build -p
 # bb-mobile-ffi` produces libbb_mobile_ffi.so, which carries BOTH uniffi
@@ -155,7 +214,10 @@ bb-receipt-ffi = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1
 # which has been wrong since beanbeaver-ios 3c580a6 (2026-07-01, "drop CoreML --
 # CPU wins on speed and accuracy"). Corrected in the umbrella CLAUDE.md (
 # bb-workspace #1); fixed here because the same sentence had been copied in.
-bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.15" }
+# v0.1.16 .. v0.1.20 each carry one core tag (v0.13.1, v0.13.2, v0.14.0,
+# v0.14.1, v0.14.2) and nothing else -- no spend-layer change, so every
+# SpendXxx signature is as it was in v0.1.10.
+bb-mobile-ffi = { git = "https://github.com/Endle/beanbeaver-mobile-util", tag = "v0.1.20" }
 # `cli` provides uniffi_bindgen_main for uniffi-bindgen.rs. Keep aligned with
 # the uniffi version bb-receipt-ffi pulls in (0.28).
 uniffi = { version = "0.28", features = ["cli"] }
