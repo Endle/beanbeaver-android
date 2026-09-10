@@ -46,7 +46,15 @@ class SpendSummaryTest {
         tags: List<ItemTag> = emptyList(),
         quantity: Int = 1,
         account: String? = null,
-    ) = ReceiptItem(description, price, quantity, account, tags)
+    ) = ReceiptItem(
+        description = description,
+        itemNumber = null,
+        price = price,
+        quantity = quantity,
+        account = account,
+        tagPath = tags.lastOrNull()?.path,
+        tags = tags,
+    )
 
     private fun result(
         merchant: String = "COSTCO",

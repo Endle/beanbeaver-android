@@ -53,9 +53,11 @@ object ReceiptResultJson {
             items.put(
                 JSONObject()
                     .put("description", item.description)
+                    .put("itemNumber", item.itemNumber ?: JSONObject.NULL)
                     .put("price", item.price)
                     .put("quantity", item.quantity)
                     .put("account", item.account ?: JSONObject.NULL)
+                    .put("tagPath", item.tagPath ?: JSONObject.NULL)
                     .put("tags", tags),
             )
         }
@@ -98,6 +100,11 @@ object ReceiptResultJson {
         val items = o.getJSONArray("items").objects().map { item ->
             ReceiptItem(
                 description = item.getString("description"),
+                // Core v0.14.0 added the merchant's printed item code. A batch
+                // written before it has no such key, and null is right: the code
+                // is only ever read off the receipt, so it cannot be recovered
+                // from an older draft.
+                itemNumber = item.optNullableString("itemNumber"),
                 price = item.getString("price"),
                 quantity = item.getInt("quantity"),
                 // Pre-0.7.0 wrote a `category` holding a *classifier key*
@@ -107,6 +114,12 @@ object ReceiptResultJson {
                 // account and relies on its stored `beancount` text, which is
                 // authoritative.
                 account = item.optNullableString("account"),
+                // Core v0.13.2 added the winning classification path. A batch
+                // written before it has no such key, and null is the honest
+                // answer there: the deepest tag is not reliably the one that
+                // claimed the account, which is why core stopped deriving it
+                // that way.
+                tagPath = item.optNullableString("tagPath"),
                 tags = item.decodeTags(),
             )
         }

@@ -109,6 +109,15 @@ data class EditedItemDraft(
      * is empty. Null on a line the user added, which has no parse.
      */
     val parsedCategory: String? = null,
+    /**
+     * The merchant's printed item code, carried through the edit unchanged.
+     *
+     * Held but never shown or edited: core keeps the prior code only when the
+     * description still matches, so a line the user RENAMES would lose its code
+     * unless we hand the original back. Null on a line the user added, which has
+     * no printed code.
+     */
+    val itemNumber: String? = null,
 ) {
     companion object {
         fun of(item: ReceiptItem) = EditedItemDraft(
@@ -116,6 +125,7 @@ data class EditedItemDraft(
             price = item.price,
             quantity = item.quantity,
             parsedCategory = item.tags.lastOrNull()?.display,
+            itemNumber = item.itemNumber,
         )
 
         /**
@@ -281,6 +291,7 @@ data class ReceiptEditDraft(
 
     private fun edited(draft: EditedItemDraft) = EditedItem(
         description = draft.description.trim(),
+        itemNumber = draft.itemNumber,
         price = normalizedAmount(draft.price) ?: draft.price.trim(),
         quantity = draft.quantity,
         tagPath = draft.tagPath,
