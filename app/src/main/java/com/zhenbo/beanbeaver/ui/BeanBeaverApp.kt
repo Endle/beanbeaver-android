@@ -117,7 +117,6 @@ import com.zhenbo.beanbeaver.ui.theme.bbCardFill
 import com.zhenbo.beanbeaver.ui.theme.bbCardShadow
 import com.zhenbo.beanbeaver.ui.theme.bbHairline
 import com.zhenbo.beanbeaver.ui.theme.bbInkSecondary
-import com.zhenbo.beanbeaver.ui.theme.bbImpactSoft
 import com.zhenbo.beanbeaver.ui.theme.bbImpactText
 import uniffi.bb_receipt_ffi.MerchantMatchStatus
 import uniffi.bb_receipt_ffi.ReceiptItem
@@ -643,7 +642,6 @@ private fun ResultPane(
         ReceiptCard(
             result = result,
             wallMs = wallMs,
-            impact = { ImpactChip(result) },
             // Four, which is what fits with the actions below it still on screen.
             collapseItemsAfter = 4,
             showsTornEdge = true,
@@ -682,53 +680,6 @@ private fun ResultPane(
 }
 
 /**
- * What this scan did to the month, in one line — the answer to the question the
- * app is now *for*, placed above the ledger actions rather than below them.
- *
- * Reads the month *after* the record was stored, so it states the new total
- * rather than predicting it. Absent when the receipt isn't in the store yet (a
- * parse that wasn't recorded), rather than guessing at a figure.
- */
-@Composable
-private fun ImpactChip(result: ReceiptResult) {
-    val records by SpendStore.records.collectAsStateWithLifecycle()
-    val hidden by AmountPrivacy.hideAmounts.collectAsStateWithLifecycle()
-    // Matched on the identity the store dedups by.
-    val id = result.beanbeaverId ?: return
-    val record = records.firstOrNull { it.result.beanbeaverId == id } ?: return
-
-    val monthId = SpendSummary.monthId(record)
-    val month = SpendSummary.month(monthId, records)
-    val own = SpendSummary.month(monthId, listOf(record))
-    val shortMonth = SpendSummary.monthLabel(monthId).substringBefore(' ')
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(bbImpactSoft)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(
-            "Added to $shortMonth · now ${maskedAmount(formatCurrency(month.tracked), hidden)}",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = bbImpactText,
-        )
-        if (own.roots.isNotEmpty()) {
-            Text(
-                own.roots.joinToString(", ") {
-                    "${maskedAmount(formatCurrency(it.amount), hidden)} ${it.label.lowercase()}"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = bbImpactText,
-            )
-        }
-    }
-}
-
-/**
  * The parsed receipt — merchant, totals, items, warnings, and (collapsed) the
  * generated beancount + per-phase timings. The Kotlin twin of iOS `ReceiptCard`.
  */
@@ -736,14 +687,6 @@ private fun ImpactChip(result: ReceiptResult) {
 internal fun ReceiptCard(
     result: ReceiptResult,
     wallMs: Double,
-    /**
-     * Optional banner between the header and the items — the scan-result
-     * screen's "what this did to your month" chip. Sits *inside* the card and
-     * above the line items on purpose: it answers the question the app is for,
-     * and the items are the supporting detail. The batch detail passes nothing,
-     * since a receipt opened from a list was not just added.
-     */
-    impact: (@Composable () -> Unit)? = null,
     /**
      * Show this many items, then collapse the rest behind a "Show all N items"
      * control. Null lists everything.
@@ -792,7 +735,6 @@ internal fun ReceiptCard(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 ReceiptHeader(result)
-                impact?.invoke()
                 if (result.items.isNotEmpty()) {
                     HorizontalDivider(color = bbHairline)
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -999,7 +941,7 @@ private fun ItemRow(item: ReceiptItem) {
             price.text,
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = FontFamily.Monospace,
-            color = if (price.isNegative) BbAccent else MaterialTheme.colorScheme.onSurface,
+            color = if (price.isNegative) bbImpactText else MaterialTheme.colorScheme.onSurface,
         )
     }
 }

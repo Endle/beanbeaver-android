@@ -102,19 +102,12 @@ val bbChartBaseline: Color
         else Color(0xFF3C3C43).copy(alpha = 0.14f)
 
 /**
- * The scan-result impact chip: "this is what the scan did to your month".
- *
- * Green because it is a confirmation, but deliberately **not** [bbExported],
- * which means "reached your ledger" and nothing else — a receipt can land in
- * your month without going anywhere near a ledger.
+ * Green ink for a figure that reads as a credit — a negative line item, a
+ * discount. Deliberately **not** [bbExported], which means "reached your
+ * ledger" and nothing else.
  */
 val bbImpactText: Color
     @Composable get() = if (isSystemInDarkTheme()) Color(0xFF6BD185) else Color(0xFF166B2C)
-
-val bbImpactSoft: Color
-    @Composable get() =
-        if (isSystemInDarkTheme()) Color(0xFF248A3D).copy(alpha = 0.22f)
-        else Color(0xFF248A3D).copy(alpha = 0.10f)
 
 /**
  * iOS "grouped" surfaces, ported so cards sit on a slightly recessed page the
